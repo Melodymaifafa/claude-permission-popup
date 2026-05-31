@@ -1,10 +1,16 @@
 import { execSync } from "node:child_process";
 
-// Chinese if the macOS preferred language starts with zh, else English.
+// Pure: pick zh/en from the PRIMARY (first) language in the AppleLanguages
+// list. Only the first entry matters — a secondary zh must NOT flip an
+// en-primary user (the list is ordered, e.g. ("en-US", "zh-Hans-US")).
+export function langFromOutput(out) {
+  const primary = (String(out).match(/"([^"]+)"/) || [, ""])[1].toLowerCase();
+  return primary.startsWith("zh") ? "zh" : "en";
+}
+
 export function pickLang() {
   try {
-    const out = execSync("defaults read -g AppleLanguages 2>/dev/null", { encoding: "utf8" });
-    return /"?zh/i.test(out) ? "zh" : "en";
+    return langFromOutput(execSync("defaults read -g AppleLanguages 2>/dev/null", { encoding: "utf8" }));
   } catch {
     return "en";
   }
