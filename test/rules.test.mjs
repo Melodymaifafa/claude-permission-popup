@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildRule, detailLine, firstWord, bashPrefix, hostFromUrl } from "../src/rules.mjs";
+import { buildRule, detailLine, firstWord, bashPrefix, hostFromUrl, hasShellMeta } from "../src/rules.mjs";
 
 test("firstWord", () => {
   assert.equal(firstWord("git status --short"), "git");
