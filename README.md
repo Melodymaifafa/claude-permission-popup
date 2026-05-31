@@ -37,14 +37,24 @@ npx claude-permission-popup uninstall
 
 | Tool | What "Always" remembers |
 |------|-------------------------|
-| Safe Bash | program + subcommand — `git status` → `Bash(git status *)`. One click; a different subcommand like `git push --force` still prompts. |
-| Dangerous Bash (`rm`, `sudo`, `dd`, `git push --force`, …) | **no Always button** — allow once only |
+| Safe Bash | program (+ subcommand for `git`/`npm`/`docker`/…) — `git status -s` → `Bash(git status *)`, `node a.mjs` → `Bash(node *)`. Leading `VAR=…` and wrappers (`env`, `nohup`, `time`, …) are stripped. |
+| Compound Bash (pipes, `&&`, `;`, subshells, `$(…)`) | the full command, verbatim — no fragile prefix guessing |
+| Dangerous Bash (`rm`, `sudo`, `dd`, `git push --force`, writing to `/dev/sda`, …) | **no Always button** — allow once only |
 | WebFetch | asks: just this domain, or all websites |
 | Read/Edit/Write | this file |
 | Other tools | the tool name |
 
+## Ignored tools
+
+The popup never appears for tools that run their own UI or have no side effects —
+it abstains so Claude Code handles them natively: `AskUserQuestion` and
+`ExitPlanMode` (force-allowing them would swallow their prompts), plus the Todo
+bookkeeping tools.
+
 ## Safety
 
 - Only an explicit Allow/Always click allows. Timeout, Esc, or closing the dialog
-  falls through to Claude Code's normal terminal prompt — it never auto-approves.
-- `~/.claude/settings.json` is copied to `.bak` before any change.
+  abstains — it falls through to Claude Code's normal terminal prompt, never auto-approving.
+- Writes to `~/.claude/settings.json` take a file lock, so several Claude sessions
+  clicking "Always" at once can't clobber each other's rules. The file is copied to
+  `.bak` before any change.
