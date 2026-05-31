@@ -30,3 +30,16 @@ test("empty / non-string is safe", () => {
   assert.equal(isDangerous(""), false);
   assert.equal(isDangerous(undefined), false);
 });
+
+test("/dev/null redirect idiom is safe; real disk devices are not", () => {
+  // The false positive that stripped "Always" off safe commands.
+  for (const cmd of [
+    "ls 2>/dev/null", "diff a b >/dev/null 2>&1", "grep x y 2>/dev/null",
+    "cmd >/dev/stdout", "cmd 2>/dev/stderr", "echo x >/dev/tty",
+  ]) assert.equal(isDangerous(cmd), false, `should be safe: ${cmd}`);
+  // Writing to an actual disk device still must be flagged.
+  for (const cmd of [
+    "cat x > /dev/sda", "echo x > /dev/disk2", "dd if=y of=/dev/rdisk0",
+    "cmd > /dev/nvme0n1", "cmd >/dev/hda",
+  ]) assert.equal(isDangerous(cmd), true, `should be dangerous: ${cmd}`);
+});
