@@ -1,6 +1,13 @@
-import { readFile, writeFile, rename, copyFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, rename, copyFile, mkdir, open, stat, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
+
+// File-lock tuning. settings.json can be written by several concurrent Claude
+// sessions (each "Always allow" click triggers a read-modify-write). Without a
+// lock the last writer wins and silently drops the others' rules.
+const LOCK_STALE_MS = 10_000; // a lock older than this is presumed abandoned (holder crashed)
+const LOCK_TIMEOUT_MS = 5_000; // give up acquiring after this; fall back to unlocked write
+const LOCK_RETRY_MS = 25;      // poll interval while the lock is held
 
 const MATCHER = "*";
 const TIMEOUT = 7200;
@@ -64,4 +71,45 @@ export async function writeSettings(path, settings) {
   const tmp = path + ".tmp";
   await writeFile(tmp, JSON.stringify(settings, null, 2) + "\n");
   await rename(tmp, path);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Acquire a cross-process exclusive lock by atomically creating a lockfile
+// (O_EXCL via the "wx" flag). Returns a release() function. A stale lock (older
+// than LOCK_STALE_MS — its holder probably crashed) is reaped. If the lock
+// can't be taken within LOCK_TIMEOUT_MS we give up and proceed UNLOCKED: a
+// permission decision must never hang on a stuck lock — worst case we degrade
+// to the old last-writer-wins behavior, which is no worse than before.
+async function acquireLock(path) {
+  const lockPath = path + ".lock";
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      const fh = await open(lockPath, "wx");
+      await fh.close();
+      return async () => { try { await unlink(lockPath); } catch {} };
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      try {
+        const st = await stat(lockPath);
+        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) { await unlink(lockPath).catch(() => {}); continue; }
+      } catch { continue; } // lock vanished between open and stat — retry immediately
+      if (Date.now() >= deadline) return async () => {}; // give up; proceed unlocked
+      await sleep(LOCK_RETRY_MS);
+    }
+  }
+}
+
+// Read-modify-write settings.json under an exclusive lock so concurrent writers
+// (multiple Claude sessions each clicking "Always allow") don't clobber each
+// other's rules. `mutate(current)` returns the next settings object. This is
+// the ONLY safe way to persist — bare readSettings()+writeSettings() races.
+export async function updateSettings(path, mutate) {
+  const release = await acquireLock(path);
+  try {
+    await writeSettings(path, mutate(await readSettings(path)));
+  } finally {
+    await release();
+  }
 }

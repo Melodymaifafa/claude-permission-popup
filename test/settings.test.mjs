@@ -6,7 +6,7 @@ import { writeFile, rm, mkdtemp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import {
   addHook, removeHook, addAllowRule, hookEntry, hookCommand, isOurHook,
-  readSettings, writeSettings,
+  readSettings, writeSettings, updateSettings,
 } from "../src/settings.mjs";
 
 const CMD = "/usr/local/bin/node /Users/me/.claude/hooks/claude-permission-popup/hook.mjs";
@@ -76,5 +76,33 @@ test("readSettings returns {} when file absent or empty", async () => {
   const empty = join(dir, "empty.json");
   await writeFile(empty, "   ");
   assert.deepEqual(await readSettings(empty), {});
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("updateSettings applies the mutation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "cpp-"));
+  const p = join(dir, "settings.json");
+  await writeFile(p, JSON.stringify({ permissions: { allow: ["X"] } }));
+  await updateSettings(p, (s) => addAllowRule(s, "Y"));
+  assert.deepEqual((await readSettings(p)).permissions.allow, ["X", "Y"]);
+  await rm(dir, { recursive: true, force: true });
+});
+
+// The regression test for the read-modify-write race: many concurrent
+// "Always allow" persists must not clobber each other. With bare
+// readSettings()+writeSettings() this loses rules; updateSettings()'s lock
+// serializes them so every rule survives.
+test("updateSettings serializes concurrent writers — zero lost rules", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "cpp-"));
+  const p = join(dir, "settings.json");
+  await writeFile(p, JSON.stringify({ permissions: { allow: ["BASE"] } }));
+  const N = 12;
+  await Promise.all(
+    Array.from({ length: N }, (_, i) => updateSettings(p, (s) => addAllowRule(s, `RULE_${i}`))),
+  );
+  const allow = (await readSettings(p)).permissions.allow;
+  assert.ok(allow.includes("BASE"), "base rule preserved");
+  for (let i = 0; i < N; i++) assert.ok(allow.includes(`RULE_${i}`), `RULE_${i} survived`);
+  assert.equal(allow.length, N + 1, "exactly BASE + N rules, no dupes, no losses");
   await rm(dir, { recursive: true, force: true });
 });

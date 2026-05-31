@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cp, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { addHook, removeHook, readSettings, writeSettings, hookCommand } from "./src/settings.mjs";
+import { addHook, removeHook, updateSettings, hookCommand } from "./src/settings.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEST = join(homedir(), ".claude/hooks/claude-permission-popup");
@@ -29,14 +29,14 @@ async function install() {
   // process.execPath = the absolute node binary running this installer — the
   // right one to bake into the hook command so it runs regardless of PATH.
   const command = hookCommand(process.execPath, homedir());
-  await writeSettings(SETTINGS, addHook(await readSettings(SETTINGS), command));
+  await updateSettings(SETTINGS, (s) => addHook(s, command));
   console.log("✓ Installed to", DEST);
   console.log("✓ Registered PermissionRequest hook in", SETTINGS, "(backup at .bak)");
   console.log("Restart Claude Code (or run /hooks) to activate.");
 }
 
 async function uninstall() {
-  await writeSettings(SETTINGS, removeHook(await readSettings(SETTINGS)));
+  await updateSettings(SETTINGS, removeHook);
   console.log("✓ Removed the hook from", SETTINGS, "(backup at .bak)");
   console.log("Files remain in", DEST, "— delete that folder manually to fully remove.");
 }
