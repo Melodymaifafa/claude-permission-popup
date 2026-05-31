@@ -3,6 +3,7 @@ import { homedir, platform } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cp, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { addHook, removeHook, readSettings, writeSettings, hookCommand } from "./src/settings.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -12,6 +13,14 @@ const SETTINGS = join(homedir(), ".claude/settings.json");
 async function install() {
   if (platform() !== "darwin") {
     console.error("claude-permission-popup is macOS-only (it uses osascript). Aborting.");
+    process.exit(1);
+  }
+  // No ~/.claude usually means Claude Code isn't installed — registering a hook
+  // there would be a no-op. Warn and abort unless the user insists with --force.
+  if (!existsSync(join(homedir(), ".claude")) && !process.argv.includes("--force")) {
+    console.error("No ~/.claude directory found — is Claude Code installed and run at least once?");
+    console.error("If you're sure, create it anyway with:");
+    console.error("  npx claude-permission-popup install --force");
     process.exit(1);
   }
   await mkdir(DEST, { recursive: true });
