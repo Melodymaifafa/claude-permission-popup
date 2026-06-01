@@ -5,11 +5,15 @@ import { join } from "node:path";
 import { writeFile, rm, mkdtemp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import {
-  addHook, removeHook, addAllowRule, hookEntry, hookCommand, isOurHook,
-  readSettings, writeSettings,
+  addHook, removeHook, hookEntry, hookCommand, isOurHook,
+  readSettings, writeSettings, updateSettings,
 } from "../src/settings.mjs";
 
 const CMD = "/usr/local/bin/node /Users/me/.claude/hooks/claude-permission-popup/hook.mjs";
+
+// Append a "Z" to permissions.allow — a tiny mutation to exercise the
+// read-modify-write / locking paths without depending on any rule builder.
+const addZ = (z) => (s) => ({ ...s, permissions: { allow: [...(s.permissions?.allow ?? []), z] } });
 
 test("hookCommand builds <node> <home>/.../hook.mjs", () => {
   assert.equal(
@@ -52,18 +56,12 @@ test("removeHook deletes the key when nothing left", () => {
   assert.equal(r.hooks.PermissionRequest, undefined);
 });
 
-test("addAllowRule dedups", () => {
-  const a = addAllowRule({}, "Bash(git *)");
-  const b = addAllowRule(a, "Bash(git *)");
-  assert.deepEqual(b.permissions.allow, ["Bash(git *)"]);
-});
-
 test("read/write round-trip with backup + atomicity", async () => {
   const dir = await mkdtemp(join(tmpdir(), "cpp-"));
   const p = join(dir, "settings.json");
   await writeFile(p, JSON.stringify({ permissions: { allow: ["X"] } }));
   const s = await readSettings(p);
-  await writeSettings(p, addAllowRule(s, "Y"));
+  await writeSettings(p, addZ("Y")(s));
   assert.deepEqual((await readSettings(p)).permissions.allow, ["X", "Y"]);
   assert.ok(existsSync(p + ".bak"), "backup written");
   assert.ok(!existsSync(p + ".tmp"), "temp file renamed away");
@@ -76,5 +74,30 @@ test("readSettings returns {} when file absent or empty", async () => {
   const empty = join(dir, "empty.json");
   await writeFile(empty, "   ");
   assert.deepEqual(await readSettings(empty), {});
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("updateSettings applies the mutation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "cpp-"));
+  const p = join(dir, "settings.json");
+  await writeFile(p, JSON.stringify({ permissions: { allow: ["X"] } }));
+  await updateSettings(p, addZ("Y"));
+  assert.deepEqual((await readSettings(p)).permissions.allow, ["X", "Y"]);
+  await rm(dir, { recursive: true, force: true });
+});
+
+// Regression test for the read-modify-write race: concurrent install/uninstall
+// runs must not clobber each other. With bare readSettings()+writeSettings()
+// this loses writes; updateSettings()'s lock serializes them so all survive.
+test("updateSettings serializes concurrent writers — zero lost writes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "cpp-"));
+  const p = join(dir, "settings.json");
+  await writeFile(p, JSON.stringify({ permissions: { allow: ["BASE"] } }));
+  const N = 12;
+  await Promise.all(Array.from({ length: N }, (_, i) => updateSettings(p, addZ(`W_${i}`))));
+  const allow = (await readSettings(p)).permissions.allow;
+  assert.ok(allow.includes("BASE"), "base preserved");
+  for (let i = 0; i < N; i++) assert.ok(allow.includes(`W_${i}`), `W_${i} survived`);
+  assert.equal(allow.length, N + 1, "exactly BASE + N entries, no losses");
   await rm(dir, { recursive: true, force: true });
 });
