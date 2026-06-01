@@ -38,7 +38,7 @@ Three buttons:
 |--------|--------------|
 | **Allow** | Approves this one request. |
 | **Deny** | Rejects this one request. |
-| **Back** | Dismisses the popup and hands off to Claude Code's native terminal prompt — that's where "don't ask again" (Always allow) lives, scoped per-program and per-directory far better than a popup could. |
+| **Back** | Dismisses the popup, raises the terminal tab running this session to the front, and hands off to Claude Code's native prompt — that's where "don't ask again" (Always allow) lives, scoped per-program and per-directory far better than a popup could. |
 
 Pressing **Esc**, letting it **time out**, or closing the dialog does the same as
 **Back**: it abstains and falls through to the native prompt — never auto-approving.

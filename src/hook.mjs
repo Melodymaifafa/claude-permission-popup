@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { showDialog } from "./dialog.mjs";
 import { pickLang, labels } from "./i18n.mjs";
+import { jumpToTerminal } from "./jump.mjs";
 
 const ALLOW = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
 const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny" } } });
@@ -56,8 +57,11 @@ async function main() {
     timeoutSec: TIMEOUT,
   });
 
-  // Back / Esc / timeout / dismiss → abstain (no output) → native prompt gates it.
-  if (clicked === null || clicked === L.back) return;
+  // Back / Esc / timeout / dismiss → abstain (no output). Abstaining makes
+  // Claude Code render its native 1/2/3 prompt — but in the TERMINAL, which may
+  // be off-screen if the user was looking elsewhere. So first bring that
+  // terminal tab to the front; otherwise "Back" looks like a silent cancel.
+  if (clicked === null || clicked === L.back) return void jumpToTerminal();
   if (clicked === L.deny) return void process.stdout.write(DENY);
   return void process.stdout.write(ALLOW); // Allow this one request
 }

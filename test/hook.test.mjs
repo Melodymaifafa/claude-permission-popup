@@ -18,6 +18,11 @@ async function runHook({ tool, input = {}, click }) {
   await cp(SRC, sb, { recursive: true });
   await writeFile(join(sb, "dialog.mjs"),
     "export function showDialog(){const v=process.env.CPP_CLICK;return Promise.resolve(v&&v.length?v:null);}\n");
+  // Stub jump.mjs so the test never actually activates a terminal; instead it
+  // records that jumpToTerminal() ran by touching CPP_JUMP_FLAG.
+  const jumpFlag = join(sb, "jumped");
+  await writeFile(join(sb, "jump.mjs"),
+    `import { writeFileSync } from "node:fs";\nexport function jumpToTerminal(){writeFileSync(${JSON.stringify(jumpFlag)},"1");}\n`);
   const home = await mkdtemp(join(tmpdir(), "cpp-home-"));
   await mkdir(join(home, ".claude"), { recursive: true });
   await writeFile(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: [] } }));
@@ -31,47 +36,58 @@ async function runHook({ tool, input = {}, click }) {
 
   let allow = [];
   try { allow = JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8")).permissions.allow; } catch {}
+  let jumped = false;
+  try { await readFile(jumpFlag); jumped = true; } catch {}
   await rm(sb, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
-  return { stdout: stdout.trim(), allow };
+  return { stdout: stdout.trim(), allow, jumped };
 }
 
 const behavior = (s) => { try { return JSON.parse(s).hookSpecificOutput.decision.behavior; } catch { return null; } };
 
-test("interactive tools are IGNORED — abstain (empty stdout), never allow/deny", async () => {
+test("interactive tools are IGNORED — abstain before any popup, no jump", async () => {
   // Both built-in tools that render their own UI must fall through so that UI
-  // shows; force-allowing either would swallow its choices/plan prompt.
+  // shows; force-allowing either would swallow its choices/plan prompt. No
+  // popup was shown, so there is nothing to jump back from.
   for (const tool of ["AskUserQuestion", "ExitPlanMode"]) {
-    const { stdout } = await runHook({ tool, input: { questions: [] } });
+    const { stdout, jumped } = await runHook({ tool, input: { questions: [] } });
     assert.equal(stdout, "", `${tool} must emit NOTHING so native flow renders its UI`);
+    assert.equal(jumped, false, `${tool} skips the popup entirely — must not jump`);
   }
 });
 
-test("Todo tools are ignored — abstain", async () => {
+test("Todo tools are ignored — abstain before any popup, no jump", async () => {
   for (const tool of ["TodoWrite", "TodoRead"]) {
-    const { stdout } = await runHook({ tool, input: {} });
+    const { stdout, jumped } = await runHook({ tool, input: {} });
     assert.equal(stdout, "", `${tool} should abstain`);
+    assert.equal(jumped, false, `${tool} skips the popup entirely — must not jump`);
   }
 });
 
-test("timeout / dismiss abstains (empty stdout) — never auto-approves, never hard-denies", async () => {
-  const { stdout } = await runHook({ tool: "WebFetch", input: { url: "https://example.com" }, click: "" });
+test("timeout / dismiss abstains → jumps back to the terminal", async () => {
+  const { stdout, jumped } = await runHook({ tool: "WebFetch", input: { url: "https://example.com" }, click: "" });
   assert.equal(stdout, "", "timeout falls through to native, per README");
+  assert.equal(jumped, true, "a dismissed popup must surface the native prompt by raising the terminal");
 });
 
-test("Back button abstains (empty stdout) → hands off to the native prompt", async () => {
-  // On the test machine pickLang() is "en", so the Back label is "Back".
-  const { stdout } = await runHook({ tool: "Bash", input: { command: "ls" }, click: "Back" });
+test("Back button abstains → jumps back to the terminal so the native prompt is visible", async () => {
+  // On the test machine pickLang() is "en", so the Back label is "Back". The
+  // native 1/2/3 prompt renders in the terminal; the jump makes it visible even
+  // when the user was looking at another screen.
+  const { stdout, jumped } = await runHook({ tool: "Bash", input: { command: "ls" }, click: "Back" });
   assert.equal(stdout, "", "Back must emit nothing so Claude Code's native prompt takes over");
+  assert.equal(jumped, true, "Back must raise the terminal — otherwise it looks like a silent cancel");
 });
 
-test("explicit Deny click → deny", async () => {
-  const { stdout } = await runHook({ tool: "Bash", input: { command: "ls" }, click: "Deny" });
+test("explicit Deny click → deny, no jump", async () => {
+  const { stdout, jumped } = await runHook({ tool: "Bash", input: { command: "ls" }, click: "Deny" });
   assert.equal(behavior(stdout), "deny");
+  assert.equal(jumped, false, "Deny resolves the request in place — no native prompt to jump to");
 });
 
-test("Allow once → allow, and the hook never writes settings.json", async () => {
-  const { stdout, allow } = await runHook({ tool: "Bash", input: { command: "ls -la" }, click: "Allow once" });
+test("Allow → allow, never writes settings.json, no jump", async () => {
+  const { stdout, allow, jumped } = await runHook({ tool: "Bash", input: { command: "ls -la" }, click: "Allow" });
   assert.equal(behavior(stdout), "allow");
   assert.equal(allow.length, 0, "the popup no longer persists any rule — Always is the native prompt's job");
+  assert.equal(jumped, false, "Allow resolves the request in place — no native prompt to jump to");
 });
