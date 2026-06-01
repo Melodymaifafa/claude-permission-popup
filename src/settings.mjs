@@ -2,9 +2,9 @@ import { readFile, writeFile, rename, copyFile, mkdir, open, stat, unlink } from
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 
-// File-lock tuning. settings.json can be written by several concurrent Claude
-// sessions (each "Always allow" click triggers a read-modify-write). Without a
-// lock the last writer wins and silently drops the others' rules.
+// File-lock tuning. Concurrent `claude-permission-popup install`/`uninstall`
+// runs both read-modify-write settings.json; without a lock the last writer
+// wins and silently drops the other's change.
 const LOCK_STALE_MS = 10_000; // a lock older than this is presumed abandoned (holder crashed)
 const LOCK_TIMEOUT_MS = 5_000; // give up acquiring after this; fall back to unlocked write
 const LOCK_RETRY_MS = 25;      // poll interval while the lock is held
@@ -46,14 +46,6 @@ export function removeHook(settings) {
     .map((e) => ({ ...e, hooks: (e.hooks || []).filter((h) => !isOurHook(h)) }))
     .filter((e) => (e.hooks || []).length > 0);
   if (s.hooks.PermissionRequest.length === 0) delete s.hooks.PermissionRequest;
-  return s;
-}
-
-export function addAllowRule(settings, rule) {
-  const s = structuredClone(settings);
-  s.permissions ??= {};
-  s.permissions.allow ??= [];
-  if (rule && !s.permissions.allow.includes(rule)) s.permissions.allow.push(rule);
   return s;
 }
 
@@ -101,10 +93,10 @@ async function acquireLock(path) {
   }
 }
 
-// Read-modify-write settings.json under an exclusive lock so concurrent writers
-// (multiple Claude sessions each clicking "Always allow") don't clobber each
-// other's rules. `mutate(current)` returns the next settings object. This is
-// the ONLY safe way to persist — bare readSettings()+writeSettings() races.
+// Read-modify-write settings.json under an exclusive lock so concurrent
+// install/uninstall runs don't clobber each other. `mutate(current)` returns
+// the next settings object. This is the ONLY safe way to persist — bare
+// readSettings()+writeSettings() races.
 export async function updateSettings(path, mutate) {
   const release = await acquireLock(path);
   try {

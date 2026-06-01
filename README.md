@@ -2,9 +2,8 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
-Replaces Claude Code's terminal permission prompt with a centered native macOS dialog,
-so you can approve/deny without switching back to the terminal — with a risk-tiered
-"Always allow" that writes precise `permissions.allow` rules.
+Replaces Claude Code's terminal permission prompt with a centered native macOS
+dialog, so you can approve or deny without switching back to the terminal.
 
 ## Requirements
 
@@ -31,18 +30,18 @@ Restart Claude Code (or run `/hooks`) to activate. Uninstall:
 npx claude-permission-popup uninstall
 ```
 
-## How "Always allow" works
+## The dialog
 
-**Always** writes a *scoped* `permissions.allow` rule, never a blanket one:
+Three buttons:
 
-| Tool | What "Always" remembers |
-|------|-------------------------|
-| Safe Bash | program (+ subcommand for `git`/`npm`/`docker`/…) — `git status -s` → `Bash(git status *)`, `node a.mjs` → `Bash(node *)`. Leading `VAR=…` and wrappers (`env`, `nohup`, `time`, …) are stripped. |
-| Compound Bash (pipes, `&&`, `;`, subshells, `$(…)`) | the full command, verbatim — no fragile prefix guessing |
-| Dangerous Bash (`rm`, `sudo`, `dd`, `git push --force`, writing to `/dev/sda`, …) | **no Always button** — allow once only |
-| WebFetch | asks: just this domain, or all websites |
-| Read/Edit/Write | this file |
-| Other tools | the tool name |
+| Button | What it does |
+|--------|--------------|
+| **Allow** | Approves this one request. |
+| **Deny** | Rejects this one request. |
+| **Back** | Dismisses the popup and hands off to Claude Code's native terminal prompt — that's where "don't ask again" (Always allow) lives, scoped per-program and per-directory far better than a popup could. |
+
+Pressing **Esc**, letting it **time out**, or closing the dialog does the same as
+**Back**: it abstains and falls through to the native prompt — never auto-approving.
 
 ## Ignored tools
 
@@ -53,8 +52,8 @@ bookkeeping tools.
 
 ## Safety
 
-- Only an explicit Allow/Always click allows. Timeout, Esc, or closing the dialog
-  abstains — it falls through to Claude Code's normal terminal prompt, never auto-approving.
-- Writes to `~/.claude/settings.json` take a file lock, so several Claude sessions
-  clicking "Always" at once can't clobber each other's rules. The file is copied to
-  `.bak` before any change.
+- Only an explicit **Allow** click approves. **Deny** rejects. Everything else
+  (Back / Esc / timeout / close) abstains to the native prompt — the popup never
+  auto-approves and never persists any rule.
+- Install/uninstall edits to `~/.claude/settings.json` take a file lock and back
+  the file up to `.bak` first, so concurrent runs can't clobber it.

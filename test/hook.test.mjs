@@ -11,8 +11,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "..", "src");
 
 // Run the real hook.mjs in a throwaway sandbox: src copied in, dialog.mjs
-// stubbed to return whatever CPP_CLICK says (or null for timeout/dismiss),
-// HOME pointed at a temp dir so persist() writes to a throwaway settings.json.
+// stubbed to return whatever CPP_CLICK says (or null for timeout/dismiss/Back),
+// HOME pointed at a temp dir so any settings write goes to a throwaway file.
 async function runHook({ tool, input = {}, click }) {
   const sb = await mkdtemp(join(tmpdir(), "cpp-hook-"));
   await cp(SRC, sb, { recursive: true });
@@ -59,19 +59,19 @@ test("timeout / dismiss abstains (empty stdout) — never auto-approves, never h
   assert.equal(stdout, "", "timeout falls through to native, per README");
 });
 
+test("Back button abstains (empty stdout) → hands off to the native prompt", async () => {
+  // On the test machine pickLang() is "en", so the Back label is "Back".
+  const { stdout } = await runHook({ tool: "Bash", input: { command: "ls" }, click: "Back" });
+  assert.equal(stdout, "", "Back must emit nothing so Claude Code's native prompt takes over");
+});
+
 test("explicit Deny click → deny", async () => {
   const { stdout } = await runHook({ tool: "Bash", input: { command: "ls" }, click: "Deny" });
   assert.equal(behavior(stdout), "deny");
 });
 
-test("Allow once → allow, nothing persisted", async () => {
+test("Allow once → allow, and the hook never writes settings.json", async () => {
   const { stdout, allow } = await runHook({ tool: "Bash", input: { command: "ls -la" }, click: "Allow once" });
   assert.equal(behavior(stdout), "allow");
-  assert.equal(allow.length, 0, "Allow once must not write a rule");
-});
-
-test("Always on a file tool → allow + scoped rule persisted", async () => {
-  const { stdout, allow } = await runHook({ tool: "Edit", input: { file_path: "/tmp/zz.txt" }, click: "Always" });
-  assert.equal(behavior(stdout), "allow");
-  assert.ok(allow.some((r) => r.includes("/tmp/zz.txt")), "Always persists a scoped rule");
+  assert.equal(allow.length, 0, "the popup no longer persists any rule — Always is the native prompt's job");
 });

@@ -2,7 +2,7 @@
 
 [English](./README.md) | **简体中文**
 
-把 Claude Code 终端里的权限提示,换成屏幕居中的 macOS 原生弹窗——不用切回终端就能允许/拒绝。还带一个按风险分级的"始终允许",写入的是精确的 `permissions.allow` 规则,而不是一刀切放行。
+把 Claude Code 终端里的权限提示,换成屏幕居中的 macOS 原生弹窗——不用切回终端就能允许或拒绝。
 
 ## 环境要求
 
@@ -29,19 +29,23 @@ curl -fsSL https://raw.githubusercontent.com/Melodymaifafa/claude-permission-pop
 npx claude-permission-popup uninstall
 ```
 
-## "始终允许"怎么工作
+## 弹窗
 
-**始终允许**写入的是**精确**的 `permissions.allow` 规则,绝不一刀切:
+三个按钮:
 
-| 工具 | "始终允许"记住什么 |
-|------|-------------------|
-| 安全 Bash | 程序 + 子命令——`git status` → `Bash(git status *)`。一步到位;换个子命令如 `git push --force` 仍会弹窗。 |
-| 危险 Bash(`rm`、`sudo`、`dd`、`git push --force` 等) | **没有"始终允许"按钮**——只能"允许一次" |
-| WebFetch | 询问:只这个域名,还是所有网站 |
-| Read/Edit/Write | 这个文件 |
-| 其他工具 | 工具名 |
+| 按钮 | 作用 |
+|------|------|
+| **允许** | 放行这一次请求。 |
+| **拒绝** | 拒绝这一次请求。 |
+| **返回** | 关掉弹窗,交回 Claude Code 的原生终端提示——"始终允许"(don't ask again)在那里,按程序、按目录的分级远比弹窗精确。 |
+
+按 **Esc**、**超时**、或直接关掉弹窗,效果同**返回**:回落到原生提示,**永不自动放行**。
+
+## 被忽略的工具
+
+弹窗对"自带 UI"或"无副作用"的工具不出现——直接放行给 Claude Code 原生处理:`AskUserQuestion` 和 `ExitPlanMode`(强行允许会把它们的提示吞掉),以及 Todo 记录类工具。
 
 ## 安全
 
-- 只有明确点"允许/始终允许"才放行。超时、Esc 或关闭弹窗,都会回落到 Claude Code 的原生终端提示——**永不自动放行**。
-- 任何改动前,`~/.claude/settings.json` 都会先备份成 `.bak`。
+- 只有明确点**允许**才放行,**拒绝**才驳回。其余(返回 / Esc / 超时 / 关闭)一律回落到原生提示——弹窗**从不自动放行,也从不写入任何规则**。
+- 安装 / 卸载改写 `~/.claude/settings.json` 时会加文件锁、先备份成 `.bak`,并发运行也不会互相覆盖。
