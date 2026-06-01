@@ -20,13 +20,13 @@ export function findTty() {
 // TTY matches, and bring exactly that tab to the front. Matching by TTY — not
 // just `activate` — lands on the right tab even with many windows open.
 //
-// Layer 2 (fallback): when neither iTerm2 nor Terminal owns the tty — i.e. the
-// session runs in some other terminal host (VS Code's integrated terminal,
-// Warp, Ghostty…) — there is no AppleScript tab model to target, so just bring
-// that host app to the front by its bundle id (passed as argv 2). App-level
-// only: it can't focus the specific tab, which is the agreed behaviour for
-// non-iTerm2/Terminal hosts. An empty bundle id (e.g. a host that exposes none)
-// degrades to a silent no-op.
+// Layer 2 (fallback): when no tab is matched by tty — either the session runs
+// in some other terminal host (VS Code's integrated terminal, Warp, Ghostty…)
+// or in Claude Desktop, where there is no controlling tty at all (argv 1 comes
+// in empty) — there is no AppleScript tab model to target, so just bring that
+// host app to the front by its bundle id (passed as argv 2). App-level only: it
+// can't focus a specific tab/window, which is the agreed behaviour for
+// non-iTerm2/Terminal hosts. An empty bundle id degrades to a silent no-op.
 //
 // Whether each app is running is checked via System Events (`(name of
 // processes) contains ...`), NOT pgrep: iTerm's process name is the full bundle
@@ -79,19 +79,33 @@ export const JUMP_SCRIPT = `on run argv
   end if
 end run`;
 
-// Bring the terminal window/tab running this Claude session to the front, so the
-// user lands back on the native 1/2/3 permission prompt that abstaining
-// triggers. Best-effort: any failure (no TTY, app closed, Automation
-// permission denied) is swallowed — jumping is a nicety, never load-bearing.
+// Decide what to hand JUMP_SCRIPT, given the resolved tty and host bundle id.
+// Pure (no side effects) so it's unit-testable. Returns the [tty, bid] argv, or
+// null when there's nothing to focus.
+//   - tty present  → Layer 1 selects the exact iTerm2/Terminal tab.
+//   - tty empty but bid present → no terminal tab (e.g. Claude Desktop, where
+//     findTty finds no controlling terminal), but the launching GUI app is
+//     known, so Layer 2 activates it by bundle id. This is the path that brings
+//     the Claude Desktop window back to the front on "Back".
+//   - neither → not in a terminal and no known host app → nothing to do.
+export function jumpArgs(tty, bid) {
+  if (!tty && !bid) return null;
+  return [tty, bid];
+}
+
+// Bring the window running this Claude session to the front, so the user lands
+// back on the native permission prompt that abstaining triggers (the terminal
+// 1/2/3 prompt, or Claude Desktop's in-app prompt). Best-effort: any failure
+// (app closed, Automation permission denied) is swallowed — a nicety, never
+// load-bearing.
 export function jumpToTerminal() {
-  const tty = findTty();
-  if (!tty) return; // no controlling tty → not in a terminal (e.g. Desktop) → skip
   // __CFBundleIdentifier is set by macOS to the GUI app that launched this
-  // process tree, so for a terminal host it's that terminal's bundle id —
-  // exactly what Layer 2 needs. Absent (non-GUI launch) → "" → fallback no-ops.
-  const bid = process.env.__CFBundleIdentifier || "";
+  // process tree — the terminal host (iTerm2/Terminal/VS Code…) or Claude
+  // Desktop itself.
+  const args = jumpArgs(findTty(), process.env.__CFBundleIdentifier || "");
+  if (!args) return;
   try {
-    execFileSync("/usr/bin/osascript", ["-", tty, bid],
+    execFileSync("/usr/bin/osascript", ["-", ...args],
       { input: JUMP_SCRIPT, timeout: 5000, stdio: ["pipe", "ignore", "ignore"] });
   } catch {}
 }

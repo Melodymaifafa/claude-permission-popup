@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { JUMP_SCRIPT, findTty } from "../src/jump.mjs";
+import { JUMP_SCRIPT, findTty, jumpArgs } from "../src/jump.mjs";
 
 // Layer 1: iTerm2 / Terminal matched precisely by controlling TTY → focus that
 // exact tab. This is the best-experience path and must stay intact.
@@ -27,7 +27,7 @@ test("Layer 2 — fallback fires only AFTER the precise-match blocks", () => {
 
 test("Layer 2 — guards against an empty bundle id", () => {
   // fallbackBID defaults to "" and the activate is gated on it being non-empty,
-  // so a host that exposes no bundle id degrades to a silent no-op (e.g. Desktop).
+  // so a host that exposes no bundle id at all degrades to a silent no-op.
   assert.match(JUMP_SCRIPT, /set fallbackBID to ""/);
   assert.match(JUMP_SCRIPT, /if fallbackBID is not ""/);
 });
@@ -36,4 +36,21 @@ test("findTty returns a string — \"\" or a /dev path", () => {
   const t = findTty();
   assert.equal(typeof t, "string");
   if (t) assert.match(t, /^\/dev\//);
+});
+
+// jumpArgs decides whether/what to hand the AppleScript. The Claude Desktop case
+// is the bug this fixes: empty tty (no controlling terminal) but a real bundle
+// id → must still jump, so Layer 2 activates Desktop and "Back" returns there.
+test("jumpArgs — terminal tab: passes both tty and bid", () => {
+  assert.deepEqual(jumpArgs("/dev/ttys007", "com.googlecode.iterm2"),
+    ["/dev/ttys007", "com.googlecode.iterm2"]);
+});
+
+test("jumpArgs — Claude Desktop (no tty, has bid): still jumps via Layer 2", () => {
+  assert.deepEqual(jumpArgs("", "com.anthropic.claudefordesktop"),
+    ["", "com.anthropic.claudefordesktop"]);
+});
+
+test("jumpArgs — neither tty nor bid: nothing to focus", () => {
+  assert.equal(jumpArgs("", ""), null);
 });
