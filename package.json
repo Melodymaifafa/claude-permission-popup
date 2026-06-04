@@ -1,6 +1,6 @@
 {
   "name": "claude-permission-popup",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Centered native macOS permission dialog for Claude Code.",
   "type": "module",
   "bin": {
