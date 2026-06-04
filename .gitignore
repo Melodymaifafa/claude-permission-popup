@@ -2,3 +2,4 @@ node_modules/
 *.bak
 *.tmp
 .DS_Store
+.update-cache.json

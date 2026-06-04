@@ -23,6 +23,7 @@ export function labels(lang) {
       back: "返回", deny: "拒绝", once: "允许",
       allowTool: (t) => `是否允许使用 ${t}？`,
       allowAction: "是否允许此操作？",
+      updateAvailable: (v) => `🆕 新版 v${v} 可用 · 重装更新：npx claude-permission-popup@latest install`,
     };
   }
   return {
@@ -30,5 +31,6 @@ export function labels(lang) {
     back: "Back", deny: "Deny", once: "Allow",
     allowTool: (t) => `Allow ${t}?`,
     allowAction: "Allow this action?",
+    updateAvailable: (v) => `🆕 v${v} available · update: npx claude-permission-popup@latest install`,
   };
 }

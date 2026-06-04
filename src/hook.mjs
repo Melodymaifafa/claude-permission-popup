@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { showDialog } from "./dialog.mjs";
 import { pickLang, labels } from "./i18n.mjs";
 import { jumpToTerminal } from "./jump.mjs";
+import { updateNotice, maybeRefresh } from "./update.mjs";
 
 const ALLOW = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
 const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny" } } });
@@ -37,13 +38,20 @@ async function main() {
 
   if (IGNORE.has(toolName)) return; // abstain → native flow handles these
 
-  const L = labels(pickLang());
+  const lang = pickLang();
+  const L = labels(lang);
+
+  // Kick off the once-a-day npm version check now, so the network call overlaps
+  // the seconds the user spends reading the dialog (never blocks it).
+  maybeRefresh();
 
   let message = toolName ? L.allowTool(toolName) : L.allowAction;
   // Context line: the command / file / URL behind this request, capped so a
   // huge payload can't blow up the dialog.
   const detail = String(toolInput.command ?? toolInput.file_path ?? toolInput.url ?? "").slice(0, 240);
   if (detail) message += `\n\n${detail}`;
+  // Append a one-line "new version available" notice (from cache; instant).
+  message += updateNotice(lang);
 
   // Three buttons: Back (cancel) / Deny / Allow. "Always / don't ask again" is
   // intentionally delegated to Claude Code's native prompt, which scopes it far

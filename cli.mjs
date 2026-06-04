@@ -26,6 +26,9 @@ async function install() {
   await mkdir(DEST, { recursive: true });
   await cp(join(HERE, "src"), DEST, { recursive: true });
   await cp(join(HERE, "assets", "claude-icon-rounded.png"), join(DEST, "claude-icon-rounded.png"));
+  // Ship package.json too: the hook reads its own version from it to compare
+  // against the latest on npm (the update-available notice in the dialog).
+  await cp(join(HERE, "package.json"), join(DEST, "package.json"));
   // process.execPath = the absolute node binary running this installer — the
   // right one to bake into the hook command so it runs regardless of PATH.
   const command = hookCommand(process.execPath, homedir());
