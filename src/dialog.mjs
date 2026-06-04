@@ -1,6 +1,20 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 
+// Notification sound played when a dialog appears. A macOS built-in system
+// sound — change the name (Glass, Tink, Hero, Ping, Pop, Submarine, ...) or set
+// to "" to disable. Fire-and-forget: never blocks or fails the dialog.
+const SOUND = "Bottle";
+
+function playSound() {
+  if (!SOUND) return;
+  try {
+    execFile("/usr/bin/afplay", [`/System/Library/Sounds/${SOUND}.aiff`], () => {});
+  } catch {
+    /* sound is best-effort; ignore any failure */
+  }
+}
+
 // Show a modal dialog with up to 3 buttons. Resolves to the clicked button
 // label, or null on timeout / dismiss (Esc) / error / cancel-button. The
 // AppleScript reads its script from stdin (osascript -) and takes
@@ -34,6 +48,7 @@ export function showDialog({ title, message, iconPath, buttons, defaultButton, c
   end try
 end run`;
   const args = ["-", title, message, iconPath, defaultButton, cancelButton, ...buttons];
+  playSound();
   return new Promise((resolve) => {
     const child = execFile(
       "/usr/bin/osascript",
