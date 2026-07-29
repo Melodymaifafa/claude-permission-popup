@@ -1,0 +1,12 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  ci:
+    uses: Melodymaifafa/gh-workflows/.github/workflows/ci.yml@v1
+    with:
+      runtime: node
