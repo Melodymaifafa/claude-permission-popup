@@ -10,3 +10,4 @@ jobs:
     uses: Melodymaifafa/gh-workflows/.github/workflows/ci.yml@v1
     with:
       runtime: node
+      runs_on: 'macos-latest'
