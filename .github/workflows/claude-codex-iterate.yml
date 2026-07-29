@@ -1,0 +1,24 @@
+name: Claude iterates on Codex review
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+# 调用方必须声明权限：可复用工作流只能收窄，不能放宽 caller 给的权限。
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: claude-codex-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  iterate:
+    uses: Melodymaifafa/gh-workflows/.github/workflows/claude-codex-iterate.yml@v1
+    with:
+      runtime: node
+    secrets: inherit
