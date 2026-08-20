@@ -12,10 +12,6 @@ permissions:
   id-token: write
   actions: read
 
-concurrency:
-  group: claude-codex-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   iterate:
     uses: Melodymaifafa/gh-workflows/.github/workflows/claude-codex-iterate.yml@v1
