@@ -23,13 +23,17 @@ function playSound() {
 // cancelButton (optional): designating a button as the cancel button makes Esc
 // trigger it too, and clicking it raises an error → resolves to null. Pass ""
 // to omit (then Esc does nothing, per macOS).
+// signal (optional): an AbortSignal; aborting it closes the dialog from outside
+// (the request was answered elsewhere — see watch.mjs). Killing osascript takes
+// its window down, and the exit callback then resolves null like a dismiss.
 //
 // EXACTLY ONE `display dialog` runs. Whether to attach the icon is decided here
 // in JS (does the file exist?), NOT via an AppleScript `on error` fallback —
 // that fallback fired a SECOND dialog whenever the cancel button was clicked
 // (it raises error -128, which the fallback mistook for "the icon failed"), so
 // "Back" popped two dialogs.
-export function showDialog({ title, message, iconPath, buttons, defaultButton, cancelButton = "", timeoutSec }) {
+export function showDialog({ title, message, iconPath, buttons, defaultButton, cancelButton = "", timeoutSec, signal }) {
+  if (signal?.aborted) return Promise.resolve(null);
   const cancelClause = cancelButton ? " cancel button cb" : "";
   const iconClause = iconPath && existsSync(iconPath) ? " with icon (POSIX file iconPath)" : "";
   const script = `on run argv
@@ -62,5 +66,6 @@ end run`;
       },
     );
     child.stdin.end(script);
+    signal?.addEventListener("abort", () => child.kill(), { once: true });
   });
 }

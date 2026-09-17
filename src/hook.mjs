@@ -4,6 +4,7 @@ import { showDialog } from "./dialog.mjs";
 import { pickLang, labels } from "./i18n.mjs";
 import { jumpToTerminal } from "./jump.mjs";
 import { updateNotice, maybeRefresh } from "./update.mjs";
+import { watchTranscript } from "./watch.mjs";
 
 const ALLOW = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
 const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny" } } });
@@ -59,11 +60,25 @@ async function main() {
   // cancel button, so clicking it OR pressing Esc dismisses the popup → the
   // hook abstains → Claude Code's native 1/2/3 terminal prompt takes over,
   // where the richer "don't ask again" choice lives.
+  // Close the dialog ourselves the moment this request is answered somewhere
+  // else (mobile app / terminal / Claude Desktop's card) — Claude Code won't
+  // tell us, it just stops listening (see watch.mjs). Same on SIGTERM & co and
+  // when the Claude process that spawned us is gone.
+  const closer = new AbortController();
+  let closedBy = "";
+  const close = (why) => { closedBy = why; closer.abort(); };
+  const stopWatching = watchTranscript({ path: input.transcript_path || "", toolName, toolInput, onResolved: close });
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => close(sig));
+
   const clicked = await showDialog({
     title: L.title, message, iconPath: ICON,
     buttons: [L.back, L.deny, L.once], cancelButton: L.back, defaultButton: L.once,
-    timeoutSec: TIMEOUT,
+    timeoutSec: TIMEOUT, signal: closer.signal,
   });
+  stopWatching();
+  // Answered elsewhere / parent gone / signalled: nothing to decide and nobody
+  // to bring to the front. Leave quietly (no output = abstain).
+  if (closedBy) return;
 
   // Back / Esc / timeout / dismiss → abstain (no output). Abstaining makes
   // Claude Code render its native 1/2/3 prompt — but in the TERMINAL, which may

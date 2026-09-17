@@ -43,6 +43,10 @@ Three buttons:
 Pressing **Esc**, letting it **time out**, or closing the dialog does the same as
 **Back**: it abstains and falls through to the native prompt — never auto-approving.
 
+Answered somewhere else first — on your phone, in the terminal, in Claude
+Desktop's own card? The popup closes by itself. (An approved command that runs
+for a long time keeps it up until the command finishes; a deny closes it at once.)
+
 ## Ignored tools
 
 The popup never appears for tools that run their own UI or have no side effects —
