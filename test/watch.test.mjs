@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sameInput, findToolUse, findPendingToolUse, hasResult, watchTranscript } from "../src/watch.mjs";
 
-const use = (id, name, input) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+// One transcript line per content block, like Claude Code writes them; `turn`
+// is the API message id shared by the parallel calls of one assistant turn.
+const use = (id, name, input, turn = `msg_${id}`) => ({ type: "assistant", message: { id: turn, role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
 const result = (id) => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
 const line = (o) => JSON.stringify(o) + "\n";
 
@@ -34,6 +36,31 @@ test("findPendingToolUse: null when nothing is pending; findToolUse ignores resu
   assert.equal(findPendingToolUse(entries, "Bash", { command: "ls" }), null);
   assert.equal(findPendingToolUse(entries, "Edit", {}), null);
   assert.equal(findToolUse(entries, "Bash", { command: "ls" }), "t1");
+});
+
+test("findPendingToolUse: a finished sibling in the same turn does not hide the pending call", () => {
+  // separate lines sharing a message id (what Claude Code writes today)…
+  const lines = [use("r1", "Read", { file_path: "/a" }, "m1"), use("b1", "Bash", { command: "ls" }, "m1"), result("r1")];
+  assert.equal(findPendingToolUse(lines, "Bash", { command: "ls" }), "b1");
+  // …and several blocks on one line
+  const oneLine = [{ type: "assistant", message: { id: "m1", content: [
+    { type: "tool_use", id: "b1", name: "Bash", input: { command: "a" } },
+    { type: "tool_use", id: "b2", name: "Bash", input: { command: "b" } },
+  ] } }, result("b1")];
+  assert.equal(findPendingToolUse(oneLine, "Bash", { command: "b" }), "b2");
+});
+
+test("findPendingToolUse: identical pending calls in one turn → the earliest (they run in order)", () => {
+  const entries = [use("d1", "Bash", { command: "git status" }, "m1"), use("d2", "Bash", { command: "git status" }, "m1")];
+  assert.equal(findPendingToolUse(entries, "Bash", { command: "git status" }), "d1");
+  assert.equal(findPendingToolUse([...entries, result("d1")], "Bash", { command: "git status" }), "d2");
+  // name-only fallback follows the same order
+  assert.equal(findPendingToolUse(entries, "Bash", { command: "rewritten" }), "d1");
+});
+
+test("findPendingToolUse: a stale unresolved call from an older turn loses to the newest turn", () => {
+  const entries = [use("stale", "Bash", { command: "ls" }, "m1"), use("cur", "Bash", { command: "ls" }, "m2")];
+  assert.equal(findPendingToolUse(entries, "Bash", { command: "ls" }), "cur");
 });
 
 test("hasResult", () => {
@@ -69,6 +96,20 @@ test("watchTranscript copes with the tool_use and its result arriving after star
   const stop = watchTranscript({ path, toolName: "Edit", toolInput: { file_path: "/a" }, onResolved: (w) => (why = w), intervalMs: 15 });
   await new Promise((r) => setTimeout(r, 40));
   appendFileSync(path, line(use("e1", "Edit", { file_path: "/a" })) + line(result("e1")));
+  await waitFor(() => why !== null);
+  assert.equal(why, "resolved");
+  stop();
+});
+
+test("watchTranscript keeps retrying until the transcript becomes readable", async () => {
+  const path = join(mkdtempSync(join(tmpdir(), "cpp-")), "late.jsonl");
+  let why = null;
+  const stop = watchTranscript({ path, toolName: "Bash", toolInput: { command: "ls" }, onResolved: (w) => (why = w), intervalMs: 15 });
+  await new Promise((r) => setTimeout(r, 40));
+  writeFileSync(path, line(use("late", "Bash", { command: "ls" })));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(why, null);
+  appendFileSync(path, line(result("late")));
   await waitFor(() => why !== null);
   assert.equal(why, "resolved");
   stop();

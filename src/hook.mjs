@@ -67,15 +67,22 @@ async function main() {
   const closer = new AbortController();
   let closedBy = "";
   const close = (why) => { closedBy = why; closer.abort(); };
-  const stopWatching = watchTranscript({ path: input.transcript_path || "", toolName, toolInput, onResolved: close });
-  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => close(sig));
+  const SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
+  for (const sig of SIGNALS) process.on(sig, close);
 
-  const clicked = await showDialog({
+  // Spawn the dialog FIRST, then start watching: the watcher's initial
+  // transcript scan is synchronous and would otherwise delay the popup.
+  const dialog = showDialog({
     title: L.title, message, iconPath: ICON,
     buttons: [L.back, L.deny, L.once], cancelButton: L.back, defaultButton: L.once,
     timeoutSec: TIMEOUT, signal: closer.signal,
   });
+  const stopWatching = watchTranscript({ path: input.transcript_path || "", toolName, toolInput, onResolved: close });
+  const clicked = await dialog;
   stopWatching();
+  // Nothing left to close: give the signals their default (terminate) back, so
+  // a late SIGTERM is not swallowed while the background update check finishes.
+  for (const sig of SIGNALS) process.off(sig, close);
   // Answered elsewhere / parent gone / signalled: nothing to decide and nobody
   // to bring to the front. Leave quietly (no output = abstain).
   if (closedBy) return;

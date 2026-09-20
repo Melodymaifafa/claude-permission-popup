@@ -30,10 +30,12 @@ export function sameInput(a, b) {
   return canon(a) === canon(b);
 }
 
+// Only lines carrying a tool_use / tool_result matter; skipping the rest before
+// JSON.parse keeps big attachment / snapshot lines out of the hot path.
 export function parseLines(text) {
   const out = [];
   for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
+    if (!line.includes('"tool_use"') && !line.includes('"tool_result"')) continue;
     try { out.push(JSON.parse(line)); } catch { /* partial or foreign line */ }
   }
   return out;
@@ -44,21 +46,27 @@ function blocks(e, entryType, blockType) {
   return Array.isArray(c) ? c.filter((b) => b?.type === blockType) : [];
 }
 
-// Latest assistant tool_use matching the name (and, preferably, the input),
-// ignoring whether it already has a result. Pure.
-export function findToolUse(entries, toolName, toolInput) {
-  const uses = entries.flatMap((e) => blocks(e, "assistant", "tool_use")).filter((u) => u.name === toolName);
+// Claude Code writes one transcript line per content block, so the parallel
+// tool calls of one assistant turn are separate lines sharing `message.id`.
+// Candidates are the calls whose input matches exactly, else (a PreToolUse hook
+// may have rewritten the input) every call with the name. Among them: the
+// NEWEST turn wins (older leftovers are stale), and within it the EARLIEST
+// call, because calls run in the order they were issued. `done` = tool_use ids
+// to skip. Pure.
+export function findToolUse(entries, toolName, toolInput, done = new Set()) {
+  const uses = entries.flatMap((e) => blocks(e, "assistant", "tool_use").map((u) => ({ ...u, turn: e.message?.id })))
+    .filter((u) => u.name === toolName && !done.has(u.id));
   const exact = uses.filter((u) => sameInput(u.input, toolInput));
-  return (exact.at(-1) ?? uses.at(-1))?.id ?? null;
+  const pool = exact.length ? exact : uses;
+  if (!pool.length) return null;
+  return pool.find((u) => u.turn === pool.at(-1).turn).id;
 }
 
-// Same, but only among tool_uses that have no tool_result yet — the one this
-// hook is being asked about. Prefers an exact name+input match; falls back to
-// name only because a PreToolUse hook may have rewritten the input. Pure.
+// Same, but only among tool_uses with no tool_result yet — the request this
+// hook is being asked about. Pure.
 export function findPendingToolUse(entries, toolName, toolInput) {
   const done = new Set(entries.flatMap((e) => blocks(e, "user", "tool_result")).map((r) => r.tool_use_id));
-  const open = entries.filter((e) => e?.type !== "assistant" || !blocks(e, "assistant", "tool_use").some((u) => done.has(u.id)));
-  return findToolUse(open, toolName, toolInput);
+  return findToolUse(entries, toolName, toolInput, done);
 }
 
 // True if any entry carries the tool_result for `id`. Pure.
@@ -84,22 +92,28 @@ function readAt(fd, pos, len) {
 // missing/unreadable transcript just leaves the parent watchdog running.
 export function watchTranscript({ path, toolName, toolInput, onResolved, intervalMs = 250, ppid = process.ppid }) {
   let fd = null, offset = 0, carry = Buffer.alloc(0), id = null;
-  try {
-    fd = openSync(path, "r");
-    const size = fstatSync(fd).size;
-    const start = Math.max(0, size - TAIL_BYTES);
-    let text = readAt(fd, start, size - start).toString("utf8");
-    if (start > 0) text = text.slice(text.indexOf("\n") + 1); // drop the partial first line
-    id = findPendingToolUse(parseLines(text), toolName, toolInput);
-    offset = size;
-  } catch {
-    if (fd !== null) { try { closeSync(fd); } catch {} }
-    fd = null;
+  // Open + scan the tail for the pending request. Retried from the tick until
+  // it works: the transcript may not be readable yet when the hook starts.
+  function tryOpen() {
+    if (!path) return;
+    try {
+      fd = openSync(path, "r");
+      const size = fstatSync(fd).size;
+      const start = Math.max(0, size - TAIL_BYTES);
+      let text = readAt(fd, start, size - start).toString("utf8");
+      if (start > 0) text = text.slice(text.indexOf("\n") + 1); // drop the partial first line
+      id = findPendingToolUse(parseLines(text), toolName, toolInput);
+      offset = size;
+    } catch {
+      if (fd !== null) { try { closeSync(fd); } catch {} }
+      fd = null;
+    }
   }
+  tryOpen();
 
   const timer = setInterval(() => {
     if (process.ppid !== ppid) return finish("parent-gone");
-    if (fd === null) return;
+    if (fd === null) return tryOpen();
     let size;
     try { size = fstatSync(fd).size; } catch { return; }
     if (size < offset) { offset = 0; carry = Buffer.alloc(0); } // truncated / rotated
