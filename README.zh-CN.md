@@ -41,6 +41,8 @@ npx claude-permission-popup uninstall
 
 按 **Esc**、**超时**、或直接关掉弹窗,效果同**返回**:回落到原生提示,**永不自动放行**。
 
+先在别处答了——手机上、终端里、Claude Desktop 自己的卡片上?弹窗会自己关掉。(放行的命令若跑得久,弹窗会等命令跑完再关;拒绝则立刻关。)
+
 ## 被忽略的工具
 
 弹窗对"自带 UI"或"无副作用"的工具不出现——直接放行给 Claude Code 原生处理:`AskUserQuestion` 和 `ExitPlanMode`(强行允许会把它们的提示吞掉),以及 Todo 记录类工具。
