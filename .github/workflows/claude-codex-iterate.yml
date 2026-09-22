@@ -17,4 +17,7 @@ jobs:
     uses: Melodymaifafa/gh-workflows/.github/workflows/claude-codex-iterate.yml@v1
     with:
       runtime: node
+      # iterate 跑在 ubuntu；package.json 限定 os=darwin，npm install 会报 EBADPLATFORM。
+      # 测试只用 node 内置模块，不装依赖直接跑。
+      verify_cmd: node --test
     secrets: inherit
