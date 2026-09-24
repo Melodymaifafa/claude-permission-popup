@@ -57,7 +57,10 @@ end run`;
     const child = execFile(
       "/usr/bin/osascript",
       args,
-      { timeout: (timeoutSec + 10) * 1000, maxBuffer: 1 << 20 },
+      // Backstop in case osascript ignores its own `giving up after`. The margin
+      // is deliberately small: the caller sizes timeoutSec to expire just before
+      // its own deadline, so this must not push the total past it.
+      { timeout: (timeoutSec + 5) * 1000, maxBuffer: 1 << 20 },
       (err, stdout) => {
         if (err) return resolve(null);
         const out = String(stdout).trim();

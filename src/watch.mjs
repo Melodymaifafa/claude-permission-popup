@@ -3,10 +3,11 @@ import { openSync, readSync, fstatSync, closeSync } from "node:fs";
 // Claude Code never cancels a running PermissionRequest hook once the prompt
 // has been answered somewhere else — the mobile app, the terminal, Claude
 // Desktop's own permission card. It just stops listening (no SIGTERM, nothing).
-// Left alone, our dialog would sit on screen until clicked or until its
-// 2-minute timeout. So while the dialog is up, this module watches the session
-// transcript for the moment THIS request gets resolved by any channel, and the
-// hook closes the dialog itself.
+// Left alone, our dialog would sit on screen until clicked — it has no
+// auto-dismiss, only a give-up deadline hours out that exists to avoid an
+// orphaned window (see hook.mjs). So while the dialog is up, this module watches
+// the session transcript for the moment THIS request gets resolved by any
+// channel, and the hook closes the dialog itself.
 //
 // The hook input carries no tool_use_id (only tool_name + tool_input), so the
 // pending tool_use is found by matching those against the assistant's tool_use

@@ -10,7 +10,10 @@ const LOCK_TIMEOUT_MS = 5_000; // give up acquiring after this; fall back to unl
 const LOCK_RETRY_MS = 25;      // poll interval while the lock is held
 
 const MATCHER = "*";
-const TIMEOUT = 7200;
+// How long Claude Code lets our hook run before it kills it. It is also the hard
+// ceiling on how long the dialog can stay on screen, so hook.mjs derives the
+// dialog's own "give up" deadline from it — keep this the single source of truth.
+export const HOOK_TIMEOUT = 7200;
 // Match our hook by its script path, NOT the full command — the node binary
 // prefix varies per machine (we bake in an absolute path at install time).
 const SCRIPT_MARKER = "claude-permission-popup/hook.mjs";
@@ -22,7 +25,7 @@ export function hookCommand(nodeBin, home) {
 }
 
 export function hookEntry(command) {
-  return { matcher: MATCHER, hooks: [{ type: "command", command, timeout: TIMEOUT }] };
+  return { matcher: MATCHER, hooks: [{ type: "command", command, timeout: HOOK_TIMEOUT }] };
 }
 
 export function isOurHook(h) {

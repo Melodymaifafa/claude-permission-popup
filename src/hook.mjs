@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { showDialog } from "./dialog.mjs";
 import { pickLang, labels } from "./i18n.mjs";
 import { jumpToTerminal } from "./jump.mjs";
+import { HOOK_TIMEOUT } from "./settings.mjs";
 import { updateNotice, maybeRefresh } from "./update.mjs";
 import { watchTranscript } from "./watch.mjs";
 
@@ -18,7 +19,16 @@ const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRe
 //   2. No-side-effect bookkeeping (the Todo tools) — a popup is pure noise.
 const IGNORE = new Set(["AskUserQuestion", "ExitPlanMode", "TodoWrite", "TodoRead"]);
 
-const TIMEOUT = 120; // dialog auto-dismisses after 2 min; under the settings.json hook timeout
+// The dialog does NOT auto-dismiss: an unanswered request stays on screen. The
+// three ways it closes are all real events — a click/Esc, the request being
+// answered elsewhere, or the Claude process going away (both in watch.mjs).
+//
+// This deadline is only the escape hatch for the fourth, uncatchable one:
+// Claude Code kills the hook when HOOK_TIMEOUT expires, and a hard kill leaves
+// osascript orphaned with its window stuck on screen forever. Giving up a few
+// seconds EARLIER lets the dialog take itself down first, so it must stay
+// strictly under HOOK_TIMEOUT — hence derived from it rather than hardcoded.
+const TIMEOUT = HOOK_TIMEOUT - 10;
 const ICON = join(homedir(), ".claude/hooks/claude-permission-popup/claude-icon-rounded.png");
 
 function readStdin() {
@@ -87,7 +97,7 @@ async function main() {
   // to bring to the front. Leave quietly (no output = abstain).
   if (closedBy) return;
 
-  // Back / Esc / timeout / dismiss → abstain (no output). Abstaining makes
+  // Back / Esc / dismiss → abstain (no output). Abstaining makes
   // Claude Code render its native 1/2/3 prompt — but in the TERMINAL, which may
   // be off-screen if the user was looking elsewhere. So first bring that
   // terminal tab to the front; otherwise "Back" looks like a silent cancel.
