@@ -43,8 +43,11 @@ Three buttons:
 Pressing **Esc** or closing the dialog does the same as **Back**: it abstains and
 falls through to the native prompt — never auto-approving.
 
-The dialog does not time out. Leave it alone and it stays on screen until you
-answer it, so a request can't disappear while you're away from the keyboard.
+Leave it alone and it stays on screen until you answer it — no arbitrary
+seconds-long timeout, so a request won't disappear while you're away from the
+keyboard for a coffee break. The one limit is Claude Code's own hook timeout,
+about two hours; past that the dialog gives up and falls through to the
+native prompt, same as **Back**.
 
 Answered somewhere else first — on your phone, in the terminal, in Claude
 Desktop's own card? The popup closes by itself. (An approved command that runs
