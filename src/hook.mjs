@@ -5,6 +5,7 @@ import { scheduledTaskName } from "./context.mjs";
 import { showDialog } from "./dialog.mjs";
 import { pickLang, labels } from "./i18n.mjs";
 import { jumpToTerminal } from "./jump.mjs";
+import { buildMessage } from "./message.mjs";
 import { HOOK_TIMEOUT } from "./settings.mjs";
 import { updateNotice, maybeRefresh } from "./update.mjs";
 import { watchTranscript } from "./watch.mjs";
@@ -75,13 +76,9 @@ async function main() {
   // the seconds the user spends reading the dialog (never blocks it).
   maybeRefresh();
 
-  let message = toolName ? L.allowTool(toolName) : L.allowAction;
-  // Context line: the command / file / URL behind this request, capped so a
-  // huge payload can't blow up the dialog.
-  const detail = String(toolInput.command ?? toolInput.file_path ?? toolInput.url ?? "").slice(0, 240);
-  if (detail) message += `\n\n${detail}`;
-  // Append a one-line "new version available" notice (from cache; instant).
-  message += updateNotice(lang);
+  // What is asked, from which folder, with which arguments (see message.mjs),
+  // plus a one-line "new version available" notice (from cache; instant).
+  const message = buildMessage({ toolName, toolInput, cwd: input.cwd, lang }) + updateNotice(lang);
 
   // Three buttons: Back (cancel) / Deny / Allow. "Always / don't ask again" is
   // intentionally delegated to Claude Code's native prompt, which scopes it far

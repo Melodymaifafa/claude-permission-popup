@@ -64,6 +64,9 @@ test("a normal session still gets the dialog", () => {
   const r = runHook({ firstMessage: "please tidy the repo", toolName: UPDATE_TASK, toolInput: { taskId: "x", enabled: false } });
   assert.equal(r.status, 0);
   assert.ok(r.dialogArgs !== null, "osascript must be called");
+  // the dialog message names the folder and the arguments
+  assert.match(r.dialogArgs, /：demo\n|: demo\n/);
+  assert.match(r.dialogArgs, /\ntaskId=x\nenabled=false\n/);
   assert.equal(r.stdout, ALLOW);
   assert.equal(r.log, null);
 });

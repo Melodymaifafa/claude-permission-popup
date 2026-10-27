@@ -40,6 +40,12 @@ Three buttons:
 | **Deny** | Rejects this one request. |
 | **Back** | Dismisses the popup, raises the terminal tab running this session to the front, and hands off to Claude Code's native prompt — that's where "don't ask again" (Always allow) lives, scoped per-program and per-directory far better than a popup could. |
 
+Under the question, the dialog shows which session folder is asking and what
+the request is: the Bash command, file or URL, or for any other tool its first
+3 arguments as `key=value`. A command past 240 characters says how many more
+there are, and its risky part (`rm …`, `sudo …`, `git push …`) gets its own
+line so it is never hidden past the cut.
+
 Pressing **Esc** or closing the dialog does the same as **Back**: it abstains and
 falls through to the native prompt — never auto-approving.
 
