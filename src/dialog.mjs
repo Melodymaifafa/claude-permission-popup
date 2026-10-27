@@ -4,7 +4,10 @@ import { existsSync } from "node:fs";
 // Notification sound played when a dialog appears. A macOS built-in system
 // sound — change the name (Glass, Tink, Hero, Ping, Pop, Submarine, ...) or set
 // to "" to disable. Fire-and-forget: never blocks or fails the dialog.
-const SOUND = "Bottle";
+// CLAUDE_POPUP_SOUND overrides it (the tests set "" to stay silent).
+const SOUND = process.env.CLAUDE_POPUP_SOUND ?? "Bottle";
+// The tests point this at a stub so a hook run never puts a real dialog up.
+const OSASCRIPT = process.env.CLAUDE_POPUP_OSASCRIPT || "/usr/bin/osascript";
 
 function playSound() {
   if (!SOUND) return;
@@ -23,13 +26,17 @@ function playSound() {
 // cancelButton (optional): designating a button as the cancel button makes Esc
 // trigger it too, and clicking it raises an error → resolves to null. Pass ""
 // to omit (then Esc does nothing, per macOS).
+// signal (optional): an AbortSignal; aborting it closes the dialog from outside
+// (the request was answered elsewhere — see watch.mjs). Killing osascript takes
+// its window down, and the exit callback then resolves null like a dismiss.
 //
 // EXACTLY ONE `display dialog` runs. Whether to attach the icon is decided here
 // in JS (does the file exist?), NOT via an AppleScript `on error` fallback —
 // that fallback fired a SECOND dialog whenever the cancel button was clicked
 // (it raises error -128, which the fallback mistook for "the icon failed"), so
 // "Back" popped two dialogs.
-export function showDialog({ title, message, iconPath, buttons, defaultButton, cancelButton = "", timeoutSec }) {
+export function showDialog({ title, message, iconPath, buttons, defaultButton, cancelButton = "", timeoutSec, signal }) {
+  if (signal?.aborted) return Promise.resolve(null);
   const cancelClause = cancelButton ? " cancel button cb" : "";
   const iconClause = iconPath && existsSync(iconPath) ? " with icon (POSIX file iconPath)" : "";
   const script = `on run argv
@@ -51,9 +58,12 @@ end run`;
   playSound();
   return new Promise((resolve) => {
     const child = execFile(
-      "/usr/bin/osascript",
+      OSASCRIPT,
       args,
-      { timeout: (timeoutSec + 10) * 1000, maxBuffer: 1 << 20 },
+      // Backstop in case osascript ignores its own `giving up after`. The margin
+      // is deliberately small: the caller sizes timeoutSec to expire just before
+      // its own deadline, so this must not push the total past it.
+      { timeout: (timeoutSec + 5) * 1000, maxBuffer: 1 << 20 },
       (err, stdout) => {
         if (err) return resolve(null);
         const out = String(stdout).trim();
@@ -62,5 +72,6 @@ end run`;
       },
     );
     child.stdin.end(script);
+    signal?.addEventListener("abort", () => child.kill(), { once: true });
   });
 }

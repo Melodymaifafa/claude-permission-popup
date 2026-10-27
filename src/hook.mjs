@@ -1,9 +1,14 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { mkdirSync, appendFileSync } from "node:fs";
+import { scheduledTaskName } from "./context.mjs";
 import { showDialog } from "./dialog.mjs";
 import { pickLang, labels } from "./i18n.mjs";
 import { jumpToTerminal } from "./jump.mjs";
+import { buildMessage } from "./message.mjs";
+import { HOOK_TIMEOUT } from "./settings.mjs";
 import { updateNotice, maybeRefresh } from "./update.mjs";
+import { watchTranscript } from "./watch.mjs";
 
 const ALLOW = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
 const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny" } } });
@@ -17,8 +22,29 @@ const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRe
 //   2. No-side-effect bookkeeping (the Todo tools) — a popup is pure noise.
 const IGNORE = new Set(["AskUserQuestion", "ExitPlanMode", "TodoWrite", "TodoRead"]);
 
-const TIMEOUT = 120; // dialog auto-dismisses after 2 min; under the settings.json hook timeout
-const ICON = join(homedir(), ".claude/hooks/claude-permission-popup/claude-icon-rounded.png");
+// The dialog does NOT auto-dismiss: an unanswered request stays on screen. The
+// three ways it closes are all real events — a click/Esc, the request being
+// answered elsewhere, or the Claude process going away (both in watch.mjs).
+//
+// This deadline is only the escape hatch for the fourth, uncatchable one:
+// Claude Code kills the hook when HOOK_TIMEOUT expires, and a hard kill leaves
+// osascript orphaned with its window stuck on screen forever. Giving up a few
+// seconds EARLIER lets the dialog take itself down first, so it must stay
+// strictly under HOOK_TIMEOUT — hence derived from it rather than hardcoded.
+const TIMEOUT = HOOK_TIMEOUT - 10;
+// CLAUDE_POPUP_HOOK_DIR lets the tests keep the skip log out of the real folder.
+const HOOK_DIR = process.env.CLAUDE_POPUP_HOOK_DIR || join(homedir(), ".claude/hooks/claude-permission-popup");
+const ICON = join(HOOK_DIR, "claude-icon-rounded.png");
+const SKIP_LOG = join(HOOK_DIR, "skipped-scheduled.log");
+
+// One line per scheduled-task request we stayed out of: time, task, tool.
+// Best-effort: logging must never stop the hook from abstaining.
+function logSkip(task, toolName) {
+  try {
+    mkdirSync(HOOK_DIR, { recursive: true });
+    appendFileSync(SKIP_LOG, `${new Date().toISOString()}\t${task}\t${toolName}\n`);
+  } catch {}
+}
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -38,6 +64,11 @@ async function main() {
 
   if (IGNORE.has(toolName)) return; // abstain → native flow handles these
 
+  // A scheduled-task run has nobody at the screen, and Desktop ignores our
+  // answer for it anyway (see context.mjs). Abstain so Desktop decides.
+  const task = scheduledTaskName(input.transcript_path);
+  if (task !== null) return void logSkip(task, toolName);
+
   const lang = pickLang();
   const L = labels(lang);
 
@@ -45,13 +76,9 @@ async function main() {
   // the seconds the user spends reading the dialog (never blocks it).
   maybeRefresh();
 
-  let message = toolName ? L.allowTool(toolName) : L.allowAction;
-  // Context line: the command / file / URL behind this request, capped so a
-  // huge payload can't blow up the dialog.
-  const detail = String(toolInput.command ?? toolInput.file_path ?? toolInput.url ?? "").slice(0, 240);
-  if (detail) message += `\n\n${detail}`;
-  // Append a one-line "new version available" notice (from cache; instant).
-  message += updateNotice(lang);
+  // What is asked, from which folder, with which arguments (see message.mjs),
+  // plus a one-line "new version available" notice (from cache; instant).
+  const message = buildMessage({ toolName, toolInput, cwd: input.cwd, lang }) + updateNotice(lang);
 
   // Three buttons: Back (cancel) / Deny / Allow. "Always / don't ask again" is
   // intentionally delegated to Claude Code's native prompt, which scopes it far
@@ -59,13 +86,34 @@ async function main() {
   // cancel button, so clicking it OR pressing Esc dismisses the popup → the
   // hook abstains → Claude Code's native 1/2/3 terminal prompt takes over,
   // where the richer "don't ask again" choice lives.
-  const clicked = await showDialog({
+  // Close the dialog ourselves the moment this request is answered somewhere
+  // else (mobile app / terminal / Claude Desktop's card) — Claude Code won't
+  // tell us, it just stops listening (see watch.mjs). Same on SIGTERM & co and
+  // when the Claude process that spawned us is gone.
+  const closer = new AbortController();
+  let closedBy = "";
+  const close = (why) => { closedBy = why; closer.abort(); };
+  const SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
+  for (const sig of SIGNALS) process.on(sig, close);
+
+  // Spawn the dialog FIRST, then start watching: the watcher's initial
+  // transcript scan is synchronous and would otherwise delay the popup.
+  const dialog = showDialog({
     title: L.title, message, iconPath: ICON,
     buttons: [L.back, L.deny, L.once], cancelButton: L.back, defaultButton: L.once,
-    timeoutSec: TIMEOUT,
+    timeoutSec: TIMEOUT, signal: closer.signal,
   });
+  const stopWatching = watchTranscript({ path: input.transcript_path || "", toolName, toolInput, onResolved: close });
+  const clicked = await dialog;
+  stopWatching();
+  // Nothing left to close: give the signals their default (terminate) back, so
+  // a late SIGTERM is not swallowed while the background update check finishes.
+  for (const sig of SIGNALS) process.off(sig, close);
+  // Answered elsewhere / parent gone / signalled: nothing to decide and nobody
+  // to bring to the front. Leave quietly (no output = abstain).
+  if (closedBy) return;
 
-  // Back / Esc / timeout / dismiss → abstain (no output). Abstaining makes
+  // Back / Esc / dismiss → abstain (no output). Abstaining makes
   // Claude Code render its native 1/2/3 prompt — but in the TERMINAL, which may
   // be off-screen if the user was looking elsewhere. So first bring that
   // terminal tab to the front; otherwise "Back" looks like a silent cancel.

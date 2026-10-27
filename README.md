@@ -40,8 +40,24 @@ Three buttons:
 | **Deny** | Rejects this one request. |
 | **Back** | Dismisses the popup, raises the terminal tab running this session to the front, and hands off to Claude Code's native prompt — that's where "don't ask again" (Always allow) lives, scoped per-program and per-directory far better than a popup could. |
 
-Pressing **Esc**, letting it **time out**, or closing the dialog does the same as
-**Back**: it abstains and falls through to the native prompt — never auto-approving.
+Under the question, the dialog shows which session folder is asking and what
+the request is: the Bash command, file or URL, or for any other tool its first
+3 arguments as `key=value`. A command past 240 characters says how many more
+there are, and its risky part (`rm …`, `sudo …`, `git push …`) gets its own
+line so it is never hidden past the cut.
+
+Pressing **Esc** or closing the dialog does the same as **Back**: it abstains and
+falls through to the native prompt — never auto-approving.
+
+Leave it alone and it stays on screen until you answer it — no arbitrary
+seconds-long timeout, so a request won't disappear while you're away from the
+keyboard for a coffee break. The one limit is Claude Code's own hook timeout,
+about two hours; past that the dialog gives up and falls through to the
+native prompt, same as **Back**.
+
+Answered somewhere else first — on your phone, in the terminal, in Claude
+Desktop's own card? The popup closes by itself. (An approved command that runs
+for a long time keeps it up until the command finishes; a deny closes it at once.)
 
 ## Ignored tools
 
@@ -50,10 +66,15 @@ it abstains so Claude Code handles them natively: `AskUserQuestion` and
 `ExitPlanMode` (force-allowing them would swallow their prompts), plus the Todo
 bookkeeping tools.
 
+It also stays out of **Claude Desktop scheduled tasks**: nobody is watching
+those runs and Desktop ignores the popup's answer for them, so Desktop handles
+the request itself. Each skipped request adds a line (time, task, tool) to
+`~/.claude/hooks/claude-permission-popup/skipped-scheduled.log`.
+
 ## Safety
 
 - Only an explicit **Allow** click approves. **Deny** rejects. Everything else
-  (Back / Esc / timeout / close) abstains to the native prompt — the popup never
+  (Back / Esc / close) abstains to the native prompt — the popup never
   auto-approves and never persists any rule.
 - Install/uninstall edits to `~/.claude/settings.json` take a file lock and back
   the file up to `.bak` first, so concurrent runs can't clobber it.

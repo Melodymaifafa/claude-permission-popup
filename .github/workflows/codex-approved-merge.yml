@@ -17,5 +17,6 @@ jobs:
   merge:
     uses: Melodymaifafa/gh-workflows/.github/workflows/codex-approved-merge.yml@v1
     with:
-      base_branch: develop
+      # PR 直接合进 main（发版 commit 也直推 main），不走 develop。
+      base_branch: main
     secrets: inherit

@@ -23,6 +23,10 @@ export function labels(lang) {
       back: "返回", deny: "拒绝", once: "允许",
       allowTool: (t) => `是否允许使用 ${t}？`,
       allowAction: "是否允许此操作？",
+      fromTask: (n) => `来自定时任务：${n}`,
+      fromFolder: (f) => `来自文件夹：${f}`,
+      moreChars: (n) => `…后面还有 ${n} 字`,
+      moreFields: (n) => `…另有 ${n} 项参数`,
       updateAvailable: (v) => `🆕 新版 v${v} 可用 · 重装更新：npx claude-permission-popup@latest install`,
     };
   }
@@ -31,6 +35,10 @@ export function labels(lang) {
     back: "Back", deny: "Deny", once: "Allow",
     allowTool: (t) => `Allow ${t}?`,
     allowAction: "Allow this action?",
+    fromTask: (n) => `From scheduled task: ${n}`,
+    fromFolder: (f) => `From folder: ${f}`,
+    moreChars: (n) => `…${n} more chars`,
+    moreFields: (n) => `…${n} more fields`,
     updateAvailable: (v) => `🆕 v${v} available · update: npx claude-permission-popup@latest install`,
   };
 }
