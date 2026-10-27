@@ -75,7 +75,7 @@ export function hasResult(entries, id) {
   return entries.some((e) => blocks(e, "user", "tool_result").some((r) => r.tool_use_id === id));
 }
 
-function readAt(fd, pos, len) {
+export function readAt(fd, pos, len) {
   const buf = Buffer.alloc(len);
   let got = 0;
   while (got < len) {

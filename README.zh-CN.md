@@ -49,6 +49,8 @@ npx claude-permission-popup uninstall
 
 弹窗对"自带 UI"或"无副作用"的工具不出现——直接放行给 Claude Code 原生处理:`AskUserQuestion` 和 `ExitPlanMode`(强行允许会把它们的提示吞掉),以及 Todo 记录类工具。
 
+**Claude Desktop 的定时任务**也不弹:这种运行没人看着,Desktop 也不认弹窗的回答,所以交回 Desktop 自己处理。每跳过一次,就往 `~/.claude/hooks/claude-permission-popup/skipped-scheduled.log` 写一行(时间、任务名、工具名)。
+
 ## 安全
 
 - 只有明确点**允许**才放行,**拒绝**才驳回。其余(返回 / Esc / 关闭)一律回落到原生提示——弹窗**从不自动放行,也从不写入任何规则**。

@@ -60,6 +60,11 @@ it abstains so Claude Code handles them natively: `AskUserQuestion` and
 `ExitPlanMode` (force-allowing them would swallow their prompts), plus the Todo
 bookkeeping tools.
 
+It also stays out of **Claude Desktop scheduled tasks**: nobody is watching
+those runs and Desktop ignores the popup's answer for them, so Desktop handles
+the request itself. Each skipped request adds a line (time, task, tool) to
+`~/.claude/hooks/claude-permission-popup/skipped-scheduled.log`.
+
 ## Safety
 
 - Only an explicit **Allow** click approves. **Deny** rejects. Everything else
