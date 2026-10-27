@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sameInput, findToolUse, findPendingToolUse, hasResult, watchTranscript } from "../src/watch.mjs";
+import { sameInput, findToolUse, findPendingToolUse, findResolvedSince, hasResult, watchTranscript } from "../src/watch.mjs";
 
 // One transcript line per content block, like Claude Code writes them; `turn`
 // is the API message id shared by the parallel calls of one assistant turn.
 const use = (id, name, input, turn = `msg_${id}`) => ({ type: "assistant", message: { id: turn, role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
-const result = (id) => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+const result = (id, timestamp) => ({ type: "user", timestamp, message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
 const line = (o) => JSON.stringify(o) + "\n";
 
 test("sameInput ignores key order", () => {
@@ -63,6 +63,15 @@ test("findPendingToolUse: a stale unresolved call from an older turn loses to th
   assert.equal(findPendingToolUse(entries, "Bash", { command: "ls" }), "cur");
 });
 
+test("findResolvedSince: a call answered after `since` counts, history before it does not", () => {
+  const since = Date.parse("2026-01-01T00:00:10Z");
+  const old = "2026-01-01T00:00:00Z", fresh = "2026-01-01T00:00:20Z";
+  const history = [use("t1", "Bash", { command: "ls" }, "m1"), result("t1", old)];
+  assert.equal(findResolvedSince(history, "Bash", { command: "ls" }, since), null);
+  assert.equal(findResolvedSince([...history, use("t2", "Bash", { command: "ls" }, "m2"), result("t2", fresh)], "Bash", { command: "ls" }, since), "t2");
+  assert.equal(findResolvedSince([use("t3", "Bash", { command: "ls" }), result("t3")], "Bash", { command: "ls" }, since), null, "no timestamp = history");
+});
+
 test("hasResult", () => {
   assert.ok(hasResult([result("t1")], "t1"));
   assert.ok(!hasResult([result("t1"), use("t2", "Bash", {})], "t2"));
@@ -99,6 +108,50 @@ test("watchTranscript copes with the tool_use and its result arriving after star
   await waitFor(() => why !== null);
   assert.equal(why, "resolved");
   stop();
+});
+
+test("watchTranscript finishes a tool_use line that was half written at start", async (t) => {
+  const path = join(mkdtempSync(join(tmpdir(), "cpp-")), "t.jsonl");
+  const half = line(use("h1", "Bash", { command: "ls" }));
+  writeFileSync(path, line(use("old", "Bash", { command: "ls" })) + line(result("old")) + half.slice(0, 40));
+  let why = null;
+  const stop = watchTranscript({ path, toolName: "Bash", toolInput: { command: "ls" }, onResolved: (w) => (why = w), intervalMs: 15 });
+  t.after(stop);
+  await new Promise((r) => setTimeout(r, 40));
+  appendFileSync(path, half.slice(40));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(why, null, "must not fire before a result lands");
+  appendFileSync(path, line(result("h1")));
+  await waitFor(() => why !== null);
+  assert.equal(why, "resolved");
+});
+
+test("watchTranscript fires when the request was already answered before it started", async (t) => {
+  const path = join(mkdtempSync(join(tmpdir(), "cpp-")), "t.jsonl");
+  const since = Date.parse("2026-01-01T00:00:10Z");
+  writeFileSync(path, line(use("cur", "Bash", { command: "ls" })) + line(result("cur", "2026-01-01T00:00:11Z")));
+  let why = null;
+  const stop = watchTranscript({ path, toolName: "Bash", toolInput: { command: "ls" }, onResolved: (w) => (why = w), intervalMs: 15, since });
+  t.after(stop);
+  await waitFor(() => why !== null);
+  assert.equal(why, "resolved");
+});
+
+test("watchTranscript ignores a twin call answered before it started", async (t) => {
+  const path = join(mkdtempSync(join(tmpdir(), "cpp-")), "t.jsonl");
+  const since = Date.parse("2026-01-01T00:00:10Z");
+  writeFileSync(path, line(use("old", "Bash", { command: "ls" })) + line(result("old", "2026-01-01T00:00:01Z")));
+  let why = null;
+  const stop = watchTranscript({ path, toolName: "Bash", toolInput: { command: "ls" }, onResolved: (w) => (why = w), intervalMs: 15, since });
+  t.after(stop);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(why, null);
+  appendFileSync(path, line(use("cur", "Bash", { command: "ls" })));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(why, null);
+  appendFileSync(path, line(result("cur", "2026-01-01T00:00:12Z")));
+  await waitFor(() => why !== null);
+  assert.equal(why, "resolved");
 });
 
 test("watchTranscript keeps retrying until the transcript becomes readable", async () => {
