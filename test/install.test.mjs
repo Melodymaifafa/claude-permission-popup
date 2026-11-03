@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, cpSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, platform } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")).version;
 const OLD = "40acb23"; // the 0.1.8 release, before context.mjs / message.mjs
+// The installer refuses to run off macOS, so off it there is nothing to test.
+const macOnly = { skip: platform() !== "darwin" && "the installer runs only on macOS" };
 
 function fakeHome() {
   const home = mkdtempSync(join(tmpdir(), "cpp-home-"));
@@ -80,7 +82,7 @@ function gitRepo() {
   return { dir, a, b: git(dir, "rev-parse", "HEAD") };
 }
 
-test("an older copy does not overwrite a newer install, and leaves every file as it was", () => {
+test("an older copy does not overwrite a newer install, and leaves every file as it was", macOnly, () => {
   const home = fakeHome();
   assert.equal(install(copyRepo(), home).status, 0);
   const before = hashes(home);
@@ -90,7 +92,7 @@ test("an older copy does not overwrite a newer install, and leaves every file as
   assert.deepEqual(hashes(home), before);
 });
 
-test("--force overwrites a newer install anyway", () => {
+test("--force overwrites a newer install anyway", macOnly, () => {
   const home = fakeHome();
   assert.equal(install(copyRepo(), home).status, 0);
   const r = install(oldCopy(), home, "--force");
@@ -98,7 +100,7 @@ test("--force overwrites a newer install anyway", () => {
   assert.equal(installedVersion(home), "0.1.8");
 });
 
-test("an install from a git checkout stamps its commit; one from a plain copy drops the stamp", () => {
+test("an install from a git checkout stamps its commit; one from a plain copy drops the stamp", macOnly, () => {
   const { dir, b } = gitRepo();
   const home = fakeHome();
   assert.equal(install(dir, home).status, 0);
@@ -108,7 +110,7 @@ test("an install from a git checkout stamps its commit; one from a plain copy dr
   assert.equal(existsSync(join(destOf(home), ".commit")), false);
 });
 
-test("same version: an older commit or a copy without one cannot replace a newer commit", () => {
+test("same version: an older commit or a copy without one cannot replace a newer commit", macOnly, () => {
   const { dir, a, b } = gitRepo();
   const home = fakeHome();
   assert.equal(install(dir, home).status, 0);
@@ -122,7 +124,7 @@ test("same version: an older commit or a copy without one cannot replace a newer
   assert.deepEqual(hashes(home), before);
 });
 
-test("same version: a newer commit replaces an older one, a copy without one, or an unknown one", () => {
+test("same version: a newer commit replaces an older one, a copy without one, or an unknown one", macOnly, () => {
   const { dir, a, b } = gitRepo();
   const home = fakeHome();
   git(dir, "checkout", "-q", a);
@@ -142,7 +144,7 @@ test("same version: a newer commit replaces an older one, a copy without one, or
   assert.equal(installedCommit(home), b);
 });
 
-test("reinstalling the same commit goes ahead", () => {
+test("reinstalling the same commit goes ahead", macOnly, () => {
   const { dir, b } = gitRepo();
   const home = fakeHome();
   assert.equal(install(dir, home).status, 0);
