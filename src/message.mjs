@@ -23,6 +23,16 @@ export function riskySegment(command) {
   return "";
 }
 
+// First line: a plain sentence for the tools asked about most (an MCP tool is
+// matched without its mcp__<server>__ prefix), else an unknown MCP tool split
+// into server and tool, else the raw name. Pure.
+function ask(toolName, L) {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName);
+  const name = mcp ? mcp[2] : toolName.replace(/^mcp__/, "");
+  if (Object.hasOwn(L.knownTools, name)) return L.knownTools[name];
+  return mcp ? L.allowMcp(mcp[1], mcp[2]) : L.allowTool(name);
+}
+
 // The command / file / URL behind the request, or the arguments of any other
 // tool as key=value lines. Pure.
 function detail(toolInput, L) {
@@ -43,14 +53,17 @@ function detail(toolInput, L) {
 }
 
 // The dialog text (without the update notice): what is asked, who asks — the
-// scheduled task, else the session's folder — and the details. Pure.
+// scheduled task, else the session's folder — the details, and last the raw
+// tool name, kept under the cap so it can still be looked up. Pure.
 export function buildMessage({ toolName, toolInput, cwd, taskName, lang }) {
   const L = labels(lang);
-  let message = toolName ? L.allowTool(toolName) : L.allowAction;
+  let message = toolName ? ask(toolName, L) : L.allowAction;
   const folder = cwd ? basename(cwd) : "";
   if (taskName) message += "\n" + L.fromTask(clip(taskName, VALUE_MAX));
   else if (folder) message += "\n" + L.fromFolder(clip(folder, VALUE_MAX));
   const body = detail(toolInput || {}, L);
   if (body) message += `\n\n${body}`;
-  return clip(message, MAX_TOTAL);
+  if (!toolName) return clip(message, MAX_TOTAL);
+  const tool = "\n\n" + L.toolName(clip(toolName, HEAD));
+  return clip(message, MAX_TOTAL - tool.length) + tool;
 }
