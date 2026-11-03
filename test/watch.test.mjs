@@ -88,6 +88,14 @@ test("findRequest: an exact match answered since start beats a pending call that
   assert.equal(findRequest([sleep, use("g1", "Bash", status, "m1"), result("g1")], "Bash", status), "g1");
 });
 
+test("findRequest: an older turn's exact match answered since start does not shadow a rewritten pending call", () => {
+  const status = { command: "git status" };
+  const entries = [use("old", "Bash", status, "m1"), result("old", FRESH), use("cur", "Bash", { command: "git status -s" }, "m2")];
+  assert.equal(findRequest(entries, "Bash", status, SINCE), "cur");
+  // an unanswered exact match from an older turn still wins
+  assert.equal(findRequest([use("old", "Bash", status, "m1"), use("cur", "Bash", { command: "ls" }, "m2")], "Bash", status, SINCE), "old");
+});
+
 test("hasResult", () => {
   assert.ok(hasResult([result("t1")], "t1"));
   assert.ok(!hasResult([result("t1"), use("t2", "Bash", {})], "t2"));

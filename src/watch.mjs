@@ -60,7 +60,9 @@ const resultIds = (entries) => new Set(entries.flatMap((e) => blocks(e, "user", 
 // without a timestamp, are history; with no `since`, every result counts.
 // Calls whose input matches exactly come first, else (a PreToolUse hook may
 // have rewritten the input) every call with the name — so a stale unanswered
-// call of the same tool never captures a request already answered.
+// call of the same tool never captures a request already answered. An answered
+// exact match only counts in the newest turn, though: from an older turn it is
+// an earlier call that just finished, and must not shadow a rewritten pending one.
 // Claude Code writes one transcript line per content block, so the parallel
 // tool calls of one assistant turn are separate lines sharing `message.id`.
 // Among the candidates the NEWEST turn wins (older leftovers are stale); within
@@ -71,7 +73,8 @@ export function findRequest(entries, toolName, toolInput, since) {
   const fresh = since === undefined ? answered : resultIds(entries.filter((e) => Date.parse(e.timestamp) >= since));
   const uses = entries.flatMap((e) => blocks(e, "assistant", "tool_use").map((u) => ({ ...u, turn: e.message?.id })))
     .filter((u) => u.name === toolName && (!answered.has(u.id) || fresh.has(u.id)));
-  const exact = uses.filter((u) => sameInput(u.input, toolInput));
+  const newest = uses.at(-1)?.turn;
+  const exact = uses.filter((u) => sameInput(u.input, toolInput) && (!answered.has(u.id) || u.turn === newest));
   const pool = exact.length ? exact : uses;
   if (!pool.length) return null;
   const turn = pool.filter((u) => u.turn === pool.at(-1).turn);
