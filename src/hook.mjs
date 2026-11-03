@@ -1,8 +1,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { mkdirSync, appendFileSync } from "node:fs";
+import { scheduledTaskName } from "./context.mjs";
 import { showDialog } from "./dialog.mjs";
 import { pickLang, labels } from "./i18n.mjs";
 import { jumpToTerminal } from "./jump.mjs";
+import { buildMessage } from "./message.mjs";
 import { HOOK_TIMEOUT } from "./settings.mjs";
 import { updateNotice, maybeRefresh } from "./update.mjs";
 import { watchTranscript } from "./watch.mjs";
@@ -29,7 +32,19 @@ const IGNORE = new Set(["AskUserQuestion", "ExitPlanMode", "TodoWrite", "TodoRea
 // seconds EARLIER lets the dialog take itself down first, so it must stay
 // strictly under HOOK_TIMEOUT — hence derived from it rather than hardcoded.
 const TIMEOUT = HOOK_TIMEOUT - 10;
-const ICON = join(homedir(), ".claude/hooks/claude-permission-popup/claude-icon-rounded.png");
+// CLAUDE_POPUP_HOOK_DIR lets the tests keep the skip log out of the real folder.
+const HOOK_DIR = process.env.CLAUDE_POPUP_HOOK_DIR || join(homedir(), ".claude/hooks/claude-permission-popup");
+const ICON = join(HOOK_DIR, "claude-icon-rounded.png");
+const SKIP_LOG = join(HOOK_DIR, "skipped-scheduled.log");
+
+// One line per scheduled-task request we stayed out of: time, task, tool.
+// Best-effort: logging must never stop the hook from abstaining.
+function logSkip(task, toolName) {
+  try {
+    mkdirSync(HOOK_DIR, { recursive: true });
+    appendFileSync(SKIP_LOG, `${new Date().toISOString()}\t${task}\t${toolName}\n`);
+  } catch {}
+}
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -49,6 +64,11 @@ async function main() {
 
   if (IGNORE.has(toolName)) return; // abstain → native flow handles these
 
+  // A scheduled-task run has nobody at the screen, and Desktop ignores our
+  // answer for it anyway (see context.mjs). Abstain so Desktop decides.
+  const task = scheduledTaskName(input.transcript_path);
+  if (task !== null) return void logSkip(task, toolName);
+
   const lang = pickLang();
   const L = labels(lang);
 
@@ -56,13 +76,9 @@ async function main() {
   // the seconds the user spends reading the dialog (never blocks it).
   maybeRefresh();
 
-  let message = toolName ? L.allowTool(toolName) : L.allowAction;
-  // Context line: the command / file / URL behind this request, capped so a
-  // huge payload can't blow up the dialog.
-  const detail = String(toolInput.command ?? toolInput.file_path ?? toolInput.url ?? "").slice(0, 240);
-  if (detail) message += `\n\n${detail}`;
-  // Append a one-line "new version available" notice (from cache; instant).
-  message += updateNotice(lang);
+  // What is asked, from which folder, with which arguments (see message.mjs),
+  // plus a one-line "new version available" notice (from cache; instant).
+  const message = buildMessage({ toolName, toolInput, cwd: input.cwd, lang }) + updateNotice(lang);
 
   // Three buttons: Back (cancel) / Deny / Allow. "Always / don't ask again" is
   // intentionally delegated to Claude Code's native prompt, which scopes it far

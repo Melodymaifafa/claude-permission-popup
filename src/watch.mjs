@@ -17,6 +17,10 @@ import { openSync, readSync, fstatSync, closeSync } from "node:fs";
 // command ends, not when it starts.
 
 const TAIL_BYTES = 4 * 1024 * 1024; // more than enough to hold the assistant turn owning the request
+// How far before the hook's start a tool_result still counts as the answer to
+// this request: covers node startup, and is far shorter than any human answer
+// plus the model turn that must separate it from an older identical call.
+const START_SLACK_MS = 1000;
 
 // Canonical JSON: key order must never break input equality. Pure.
 function canon(v) {
@@ -47,27 +51,34 @@ function blocks(e, entryType, blockType) {
   return Array.isArray(c) ? c.filter((b) => b?.type === blockType) : [];
 }
 
+const resultIds = (entries) => new Set(entries.flatMap((e) => blocks(e, "user", "tool_result")).map((r) => r.tool_use_id));
+
+// The tool_use this hook is asked about. Candidates are the calls with no
+// tool_result yet, plus those answered at or after `since`: the request may
+// already be answered when the watcher first looks (elsewhere while the hook
+// started, or while the transcript was unreadable). Older results, and results
+// without a timestamp, are history; with no `since`, every result counts.
+// Calls whose input matches exactly come first, else (a PreToolUse hook may
+// have rewritten the input) every call with the name — so a stale unanswered
+// call of the same tool never captures a request already answered. An answered
+// exact match only counts in the newest turn, though: from an older turn it is
+// an earlier call that just finished, and must not shadow a rewritten pending one.
 // Claude Code writes one transcript line per content block, so the parallel
 // tool calls of one assistant turn are separate lines sharing `message.id`.
-// Candidates are the calls whose input matches exactly, else (a PreToolUse hook
-// may have rewritten the input) every call with the name. Among them: the
-// NEWEST turn wins (older leftovers are stale), and within it the EARLIEST
-// call, because calls run in the order they were issued. `done` = tool_use ids
-// to skip. Pure.
-export function findToolUse(entries, toolName, toolInput, done = new Set()) {
+// Among the candidates the NEWEST turn wins (older leftovers are stale); within
+// it an unanswered call beats an answered one, then the EARLIEST call, because
+// calls run in the order they were issued. Pure.
+export function findRequest(entries, toolName, toolInput, since) {
+  const answered = resultIds(entries);
+  const fresh = since === undefined ? answered : resultIds(entries.filter((e) => Date.parse(e.timestamp) >= since));
   const uses = entries.flatMap((e) => blocks(e, "assistant", "tool_use").map((u) => ({ ...u, turn: e.message?.id })))
-    .filter((u) => u.name === toolName && !done.has(u.id));
-  const exact = uses.filter((u) => sameInput(u.input, toolInput));
+    .filter((u) => u.name === toolName && (!answered.has(u.id) || fresh.has(u.id)));
+  const newest = uses.at(-1)?.turn;
+  const exact = uses.filter((u) => sameInput(u.input, toolInput) && (!answered.has(u.id) || u.turn === newest));
   const pool = exact.length ? exact : uses;
   if (!pool.length) return null;
-  return pool.find((u) => u.turn === pool.at(-1).turn).id;
-}
-
-// Same, but only among tool_uses with no tool_result yet — the request this
-// hook is being asked about. Pure.
-export function findPendingToolUse(entries, toolName, toolInput) {
-  const done = new Set(entries.flatMap((e) => blocks(e, "user", "tool_result")).map((r) => r.tool_use_id));
-  return findToolUse(entries, toolName, toolInput, done);
+  const turn = pool.filter((u) => u.turn === pool.at(-1).turn);
+  return (turn.find((u) => !answered.has(u.id)) ?? turn[0]).id;
 }
 
 // True if any entry carries the tool_result for `id`. Pure.
@@ -75,7 +86,7 @@ export function hasResult(entries, id) {
   return entries.some((e) => blocks(e, "user", "tool_result").some((r) => r.tool_use_id === id));
 }
 
-function readAt(fd, pos, len) {
+export function readAt(fd, pos, len) {
   const buf = Buffer.alloc(len);
   let got = 0;
   while (got < len) {
@@ -91,19 +102,24 @@ function readAt(fd, pos, len) {
 // gone (ppid changed: Claude exited or was killed). Calls onResolved(reason)
 // once, with "resolved" or "parent-gone". Returns stop(). Never throws: a
 // missing/unreadable transcript just leaves the parent watchdog running.
-export function watchTranscript({ path, toolName, toolInput, onResolved, intervalMs = 250, ppid = process.ppid }) {
-  let fd = null, offset = 0, carry = Buffer.alloc(0), id = null;
-  // Open + scan the tail for the pending request. Retried from the tick until
-  // it works: the transcript may not be readable yet when the hook starts.
+// `since` (ms) = when the hook started; see findRequest.
+export function watchTranscript({ path, toolName, toolInput, onResolved, intervalMs = 250, ppid = process.ppid, since = Date.now() - process.uptime() * 1000 }) {
+  let fd = null, offset = 0, carry = Buffer.alloc(0), id = null, answered = false;
+  // Open + scan the tail for the request. Retried from the tick until it
+  // works: the transcript may not be readable yet when the hook starts.
   function tryOpen() {
     if (!path) return;
     try {
       fd = openSync(path, "r");
       const size = fstatSync(fd).size;
       const start = Math.max(0, size - TAIL_BYTES);
-      let text = readAt(fd, start, size - start).toString("utf8");
-      if (start > 0) text = text.slice(text.indexOf("\n") + 1); // drop the partial first line
-      id = findPendingToolUse(parseLines(text), toolName, toolInput);
+      let buf = readAt(fd, start, size - start);
+      if (start > 0) buf = buf.subarray(buf.indexOf(0x0a) + 1); // drop the partial first line
+      const nl = buf.lastIndexOf(0x0a);
+      const entries = parseLines(buf.subarray(0, nl + 1).toString("utf8"));
+      id = findRequest(entries, toolName, toolInput, since - START_SLACK_MS);
+      answered = id !== null && hasResult(entries, id);
+      carry = buf.subarray(nl + 1); // a line still being written: the next poll completes it
       offset = size;
     } catch {
       if (fd !== null) { try { closeSync(fd); } catch {} }
@@ -114,7 +130,9 @@ export function watchTranscript({ path, toolName, toolInput, onResolved, interva
 
   const timer = setInterval(() => {
     if (process.ppid !== ppid) return finish("parent-gone");
-    if (fd === null) return tryOpen();
+    if (fd === null) tryOpen();
+    if (answered) return finish("resolved");
+    if (fd === null) return;
     let size;
     try { size = fstatSync(fd).size; } catch { return; }
     if (size < offset) { offset = 0; carry = Buffer.alloc(0); } // truncated / rotated
@@ -130,7 +148,7 @@ export function watchTranscript({ path, toolName, toolInput, onResolved, interva
     // Everything appended after the dialog opened belongs to this request (the
     // conversation is blocked on it), so a tool_use appearing now is ours even
     // if its result lands in the same batch.
-    if (id === null) id = findPendingToolUse(entries, toolName, toolInput) ?? findToolUse(entries, toolName, toolInput);
+    if (id === null) id = findRequest(entries, toolName, toolInput);
     if (id !== null && hasResult(entries, id)) finish("resolved");
   }, intervalMs);
 

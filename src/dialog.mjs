@@ -4,7 +4,10 @@ import { existsSync } from "node:fs";
 // Notification sound played when a dialog appears. A macOS built-in system
 // sound — change the name (Glass, Tink, Hero, Ping, Pop, Submarine, ...) or set
 // to "" to disable. Fire-and-forget: never blocks or fails the dialog.
-const SOUND = "Bottle";
+// CLAUDE_POPUP_SOUND overrides it (the tests set "" to stay silent).
+const SOUND = process.env.CLAUDE_POPUP_SOUND ?? "Bottle";
+// The tests point this at a stub so a hook run never puts a real dialog up.
+const OSASCRIPT = process.env.CLAUDE_POPUP_OSASCRIPT || "/usr/bin/osascript";
 
 function playSound() {
   if (!SOUND) return;
@@ -55,7 +58,7 @@ end run`;
   playSound();
   return new Promise((resolve) => {
     const child = execFile(
-      "/usr/bin/osascript",
+      OSASCRIPT,
       args,
       // Backstop in case osascript ignores its own `giving up after`. The margin
       // is deliberately small: the caller sizes timeoutSec to expire just before

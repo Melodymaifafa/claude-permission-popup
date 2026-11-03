@@ -40,6 +40,12 @@ Three buttons:
 | **Deny** | Rejects this one request. |
 | **Back** | Dismisses the popup, raises the terminal tab running this session to the front, and hands off to Claude Code's native prompt — that's where "don't ask again" (Always allow) lives, scoped per-program and per-directory far better than a popup could. |
 
+Under the question, the dialog shows which session folder is asking and what
+the request is: the Bash command, file or URL, or for any other tool its first
+3 arguments as `key=value`. A command past 240 characters says how many more
+there are, and its risky part (`rm …`, `sudo …`, `git push …`) gets its own
+line so it is never hidden past the cut.
+
 Pressing **Esc** or closing the dialog does the same as **Back**: it abstains and
 falls through to the native prompt — never auto-approving.
 
@@ -59,6 +65,11 @@ The popup never appears for tools that run their own UI or have no side effects 
 it abstains so Claude Code handles them natively: `AskUserQuestion` and
 `ExitPlanMode` (force-allowing them would swallow their prompts), plus the Todo
 bookkeeping tools.
+
+It also stays out of **Claude Desktop scheduled tasks**: nobody is watching
+those runs and Desktop ignores the popup's answer for them, so Desktop handles
+the request itself. Each skipped request adds a line (time, task, tool) to
+`~/.claude/hooks/claude-permission-popup/skipped-scheduled.log`.
 
 ## Safety
 
