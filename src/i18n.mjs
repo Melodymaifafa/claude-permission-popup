@@ -8,7 +8,10 @@ export function langFromOutput(out) {
   return primary.startsWith("zh") ? "zh" : "en";
 }
 
+// CPP_LANG=zh|en wins over the system language; the tests use it to pin one.
 export function pickLang() {
+  const forced = process.env.CPP_LANG;
+  if (forced === "zh" || forced === "en") return forced;
   try {
     return langFromOutput(execSync("defaults read -g AppleLanguages 2>/dev/null", { encoding: "utf8" }));
   } catch {
@@ -38,6 +41,8 @@ export function labels(lang) {
       moreFields: (n) => `…另有 ${n} 项参数`,
       toolName: (t) => `工具名：${t}`,
       updateAvailable: (v) => `🆕 新版 v${v} 可用 · 重装更新：npx claude-permission-popup@latest install`,
+      installedNewer: (installed, ours) => `已装的是 ${installed}，比要装的 ${ours} 新，没覆盖`,
+      forceHint: "要覆盖就加 --force",
     };
   }
   return {
@@ -60,5 +65,7 @@ export function labels(lang) {
     moreFields: (n) => `…${n} more fields`,
     toolName: (t) => `Tool: ${t}`,
     updateAvailable: (v) => `🆕 v${v} available · update: npx claude-permission-popup@latest install`,
+    installedNewer: (installed, ours) => `Installed ${installed} is newer than ${ours}; not overwritten`,
+    forceHint: "Add --force to overwrite",
   };
 }
