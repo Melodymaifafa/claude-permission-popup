@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { addHook, removeHook, updateSettings, hookCommand } from "./src/settings.mjs";
 import { isNewer } from "./src/update.mjs";
+import { pickLang, labels } from "./src/i18n.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEST = join(homedir(), ".claude/hooks/claude-permission-popup");
@@ -21,8 +22,9 @@ function git(...args) {
   try { return execFileSync("git", ["-C", HERE, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return null; }
 }
 
-// Why the copy in HERE must not replace the one in DEST, or "" when it may.
-// Versions decide; equal versions fall back to the commit stamped at install time.
+// Why the copy in HERE must not replace the one in DEST and how to force it,
+// or "" when it may. Versions decide; equal versions fall back to the commit
+// stamped at install time.
 function refusal(version, commit) {
   const destVersion = versionIn(DEST), destCommit = readText(join(DEST, ".commit"));
   const older = isNewer(destVersion, version) || (
@@ -30,7 +32,9 @@ function refusal(version, commit) {
     // Ours has no commit, or is an ancestor of the installed one. An installed
     // commit this repo doesn't know makes git fail, so that install goes ahead.
     (!commit || git("merge-base", "--is-ancestor", commit, destCommit) !== null));
-  return older ? `已装的是 ${label(destVersion, destCommit)}，比要装的 ${label(version, commit)} 新，没覆盖` : "";
+  if (!older) return "";
+  const t = labels(pickLang());
+  return `${t.installedNewer(label(destVersion, destCommit), label(version, commit))}\n${t.forceHint}`;
 }
 
 async function install() {
@@ -53,7 +57,6 @@ async function install() {
   const why = force ? "" : refusal(versionIn(HERE), commit);
   if (why) {
     console.error(why);
-    console.error("要覆盖就加 --force");
     process.exit(1);
   }
   await mkdir(DEST, { recursive: true });

@@ -23,11 +23,14 @@ function fakeHome() {
 
 const destOf = (home) => join(home, ".claude/hooks/claude-permission-popup");
 
-function install(source, home, ...args) {
+// CPP_LANG pins the installer's messages to one language, whatever this Mac uses.
+function installIn(lang, source, home, ...args) {
   return spawnSync(process.execPath, [join(source, "cli.mjs"), "install", ...args], {
-    env: { ...process.env, HOME: home }, encoding: "utf8", timeout: 10_000,
+    env: { ...process.env, HOME: home, CPP_LANG: lang }, encoding: "utf8", timeout: 10_000,
   });
 }
+
+const install = (source, home, ...args) => installIn("zh", source, home, ...args);
 
 // A copy of the installable files (no .git), optionally at another version.
 function copyRepo(version) {
@@ -42,14 +45,15 @@ function setVersion(dir, version) {
   writeFileSync(join(dir, "package.json"), JSON.stringify({ ...pkg, version }, null, 2) + "\n");
 }
 
-// Today's installer with the 0.1.8 src/ and package.json. A 0.1.8 cli.mjs has no
-// guard to test. Without that commit (shallow CI clone) the version is faked.
+// Today's installer (cli.mjs and the i18n.mjs it prints from) with the rest of the
+// 0.1.8 src/ and package.json. A 0.1.8 cli.mjs has no guard to test. Without that
+// commit (shallow CI clone) the version is faked.
 function oldCopy() {
   const tar = spawnSync("git", ["-C", REPO, "archive", "--format=tar", OLD, "src", "package.json"]);
   if (tar.status !== 0) return copyRepo("0.1.8");
   const dir = mkdtempSync(join(tmpdir(), "cpp-old-"));
   assert.equal(spawnSync("tar", ["-x", "-C", dir], { input: tar.stdout }).status, 0);
-  for (const f of ["cli.mjs", "assets"]) cpSync(join(REPO, f), join(dir, f), { recursive: true });
+  for (const f of ["cli.mjs", "assets", "src/i18n.mjs"]) cpSync(join(REPO, f), join(dir, f), { recursive: true });
   return dir;
 }
 
@@ -89,7 +93,18 @@ test("an older copy does not overwrite a newer install, and leaves every file as
   const r = install(oldCopy(), home);
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, new RegExp(`^已装的是 ${VERSION}，比要装的 0\\.1\\.8 新，没覆盖$`, "m"));
+  assert.match(r.stderr, /^要覆盖就加 --force$/m);
   assert.deepEqual(hashes(home), before);
+});
+
+test("on an English system both refusal lines are English", macOnly, () => {
+  const home = fakeHome();
+  assert.equal(install(copyRepo(), home).status, 0);
+  const r = installIn("en", oldCopy(), home);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, new RegExp(`^Installed ${VERSION} is newer than 0\\.1\\.8; not overwritten$`, "m"));
+  assert.match(r.stderr, /^Add --force to overwrite$/m);
+  assert.doesNotMatch(r.stderr, /\p{Script=Han}/u);
 });
 
 test("--force overwrites a newer install anyway", macOnly, () => {
@@ -120,6 +135,7 @@ test("same version: an older commit or a copy without one cannot replace a newer
   const r = install(dir, home);
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, new RegExp(`^已装的是 ${VERSION} \\(${b.slice(0, 7)}\\)，比要装的 ${VERSION} \\(${a.slice(0, 7)}\\) 新，没覆盖$`, "m"));
+  assert.match(r.stderr, /^要覆盖就加 --force$/m);
   assert.notEqual(install(copyRepo(), home).status, 0);
   assert.deepEqual(hashes(home), before);
 });
